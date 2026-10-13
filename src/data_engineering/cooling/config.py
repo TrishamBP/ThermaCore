@@ -29,6 +29,10 @@ class Limits:
     rapid_inlet_rise_c_per_minute: float | None = None
     airflow_drop_fraction: float | None = None
     fan_airflow_divergence_fraction: float | None = None
+    inlet_approach_margin_c: float | None = None          # within this many deg C below the inlet limit
+    inlet_approach_horizon_minutes: float | None = None   # projected to reach the inlet limit this soon
+    light_load_cpu_utilization_pct: float | None = None   # window-mean CPU below this = light load
+    light_load_gpu_utilization_pct: float | None = None   # GPU servers: window-mean GPU must also be below
 
 
 @dataclass(frozen=True)
@@ -84,10 +88,15 @@ class CoolingConfig:
             value = getattr(lim, name)
             if _is_number(value) and not 0 < value < 1:
                 problems.append(f"limits.{name} must be between 0 and 1 (exclusive)")
-        for name in ("sustained_inlet_rise_c_per_minute", "rapid_inlet_rise_c_per_minute", "temperature_delta_high_c"):
+        for name in ("sustained_inlet_rise_c_per_minute", "rapid_inlet_rise_c_per_minute", "temperature_delta_high_c",
+                     "inlet_approach_margin_c", "inlet_approach_horizon_minutes"):
             value = getattr(lim, name)
             if _is_number(value) and value <= 0:
                 problems.append(f"limits.{name} must be > 0")
+        for name in ("light_load_cpu_utilization_pct", "light_load_gpu_utilization_pct"):
+            value = getattr(lim, name)
+            if _is_number(value) and not 0 < value <= 100:
+                problems.append(f"limits.{name} must be > 0 and <= 100 (percent)")
         if (_is_number(lim.inlet_temperature_high_c) and _is_number(lim.inlet_temperature_critical_c)
                 and lim.inlet_temperature_critical_c < lim.inlet_temperature_high_c):
             problems.append("limits.inlet_temperature_critical_c must be >= limits.inlet_temperature_high_c")

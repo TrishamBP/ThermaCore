@@ -180,6 +180,11 @@ class CoolingStateEstimator:
             wl = rules.workload_finding(direction, metrics, aid)
             if wl is not None:
                 findings.append(wl)
+            light, light_skipped = rules.light_load_finding(metrics, config, aid)
+            if light is not None:
+                findings.append(light)
+            if light_skipped is not None:
+                skipped.append(light_skipped)
         state, severity = rules.classify(findings, skipped, insufficient=insufficient)
         return {"asset": asset, "series": series, "metrics": metrics, "findings": findings, "skipped": skipped,
                 "state": state, "severity": severity, "workload_direction": direction,
@@ -227,6 +232,8 @@ class CoolingStateEstimator:
             state=state, severity=severity, workload_direction=r["workload_direction"], metrics=r["metrics"],
             findings=findings, rules_not_evaluated=r["skipped"],
             data_quality=self._data_quality([r], findings, ingest_age),
+            light_load_assets=_assets_with(findings, "WL_LIGHT_LOAD"),
+            approaching_limit_assets=_assets_with(findings, "TH_APPROACHING_INLET_LIMIT"),
             source_type=asset.get("source_type"), notes=NOTES)
 
     def _data_center_snapshot(self, results, evaluated_at, as_of, window_start, config, run_id, ingest_age,
@@ -234,7 +241,11 @@ class CoolingStateEstimator:
         findings = [f for r in results for f in r["findings"]] + ([pipeline_finding] if pipeline_finding else [])
         skipped = [s for r in results for s in r["skipped"]]
         all_insufficient = bool(results) and all(r["insufficient"] for r in results)
-        state, severity = rules.classify(findings, skipped, insufficient=all_insufficient)
+        # The data center is lightly loaded only if every asset with usable readings is.
+        assessed = [r for r in results if not r["insufficient"]]
+        all_light = bool(assessed) and all(any(f.rule_id == "WL_LIGHT_LOAD" for f in r["findings"])
+                                           for r in assessed)
+        state, severity = rules.classify(findings, skipped, insufficient=all_insufficient, light_load=all_light)
 
         aggregates: dict[str, AggregateMetric] = {}
         for name in (*TELEMETRY_METRICS, "temperature_delta_c"):
@@ -280,6 +291,8 @@ class CoolingStateEstimator:
             state=state, severity=severity, workload_direction=workload, metrics=aggregates, findings=findings,
             rules_not_evaluated=_dedupe_skipped(skipped),
             data_quality=self._data_quality(results, findings, ingest_age), assets=summaries,
+            light_load_assets=_assets_with(findings, "WL_LIGHT_LOAD"),
+            approaching_limit_assets=_assets_with(findings, "TH_APPROACHING_INLET_LIMIT"),
             source_type=first.get("source_type"),
             notes=NOTES + ["Data-center metrics are statistics over each asset's own latest values and trends; "
                            "sum_of_latest is reported only for power (additive)."])
@@ -294,6 +307,10 @@ class CoolingStateEstimator:
             findings=[finding], rules_not_evaluated=[],
             data_quality=DataQuality(status="INSUFFICIENT", stale=False, unavailable_fields=sorted(UNAVAILABLE),
                                      warnings=[finding.explanation]), notes=NOTES)
+
+
+def _assets_with(findings: list[Finding], rule_id: str) -> list[str]:
+    return sorted({f.asset_id for f in findings if f.rule_id == rule_id and f.asset_id})
 
 
 def _dedupe_skipped(skipped: list[RuleNotEvaluated]) -> list[RuleNotEvaluated]:

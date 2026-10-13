@@ -23,7 +23,9 @@ STABLE = {
 }
 ALL_LIMITS = dict(inlet_temperature_high_c=27.0, inlet_temperature_critical_c=32.0, exhaust_temperature_high_c=45.0,
                   temperature_delta_high_c=20.0, sustained_inlet_rise_c_per_minute=0.1,
-                  rapid_inlet_rise_c_per_minute=0.3, airflow_drop_fraction=0.1, fan_airflow_divergence_fraction=0.1)
+                  rapid_inlet_rise_c_per_minute=0.3, airflow_drop_fraction=0.1, fan_airflow_divergence_fraction=0.1,
+                  inlet_approach_margin_c=2.0, inlet_approach_horizon_minutes=15,
+                  light_load_cpu_utilization_pct=30, light_load_gpu_utilization_pct=30)
 
 
 def config(**limits) -> CoolingConfig:

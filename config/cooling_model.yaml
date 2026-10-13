@@ -1,0 +1,77 @@
+# Cooling response model (XGBoost inlet-temperature forecaster) and cooling optimizer.
+# RECOMMENDATION-ONLY: nothing in this project can actuate fans, chillers or setpoints.
+# Override the file location with COOLING_MODEL_CONFIG=<path>.
+
+model:
+  artifact_dir: models/cooling_response   # versioned artifacts; ACTIVE names the one in use (committed)
+  horizons_minutes: [5, 10]               # one model per horizon
+  min_training_rows: 2000                 # per horizon, after purging; fewer -> training refuses
+  min_series_minutes: 60                  # runs shorter than this are not used for training
+  # Chronological split on event time across the whole timeline (no random row shuffling).
+  # Rows whose target falls in the next split are purged.
+  train_fraction: 0.70
+  validation_fraction: 0.15               # used for early stopping; the rest is the test set
+
+  features:
+    # Values at the forecast time t (missing stays missing; XGBoost handles NaN natively)
+    current: [inlet_temperature_c, exhaust_temperature_c, temperature_delta_c, workload_intensity,
+              cpu_utilization, gpu_utilization, memory_utilization, storage_utilization,
+              fan_speed_rpm, airflow_cfm, power_consumption_kw, pue]
+    # Value exactly k minutes before t (looked up by timestamp, not by row position)
+    lags_minutes:
+      inlet_temperature_c: [1, 2, 3, 5, 10, 15]
+    # Rate of change (x_t - x_{t-k}) / k, per minute
+    rates_minutes:
+      inlet_temperature_c: [1, 5, 15]
+      temperature_delta_c: [5]
+      workload_intensity: [5]
+      cpu_utilization: [5]
+      fan_speed_rpm: [1, 5]
+      airflow_cfm: [5]
+      power_consumption_kw: [5]
+    # mean / std / min / max over (t - w, t]
+    rolling_minutes:
+      inlet_temperature_c: [5, 15]
+    time_of_day: true                     # sin/cos of event-time hour (the simulator has a diurnal workload term)
+    categorical: [asset_type, cooling_type]   # one-hot; categories learned from the training split only
+
+  xgboost:                                # native xgboost.train parameters; fixed seed for reproducibility
+    objective: reg:squarederror
+    eta: 0.05
+    max_depth: 5
+    subsample: 0.8
+    colsample_bytree: 0.8
+    min_child_weight: 5
+    lambda: 1.0
+    tree_method: hist
+    seed: 42
+    nthread: 4
+    num_boost_round: 800
+    early_stopping_rounds: 50
+
+  validity:
+    # A setting is "intervention-validated" only if ALL hold on the training split:
+    #   - it is a model feature;
+    #   - its movement not explained by workload is a meaningful share of its variation;
+    #   - that independent movement is followed by inlet changes with the physically expected sign,
+    #     significant (Newey-West t, robust to autocorrelation) in most assets, at every horizon.
+    controllable_settings:
+      fan_speed_rpm: {expected_effect_sign: -1}   # more fan speed should lower inlet temperature
+    min_independent_variation_share: 0.2          # residual std after workload / total std (median over assets)
+    min_abs_t: 3.0
+    min_asset_share: 0.8
+
+optimizer:
+  controllable_setting: fan_speed_rpm
+  # REQUIRED and deliberately unset: no verified safe limits or actuator bounds exist for this
+  # (simulated) equipment. Until set, recommendations are UNAVAILABLE.
+  t_safe_c: null                  # predicted inlet temperature must stay <= this (deg C)
+  setting_min: null               # actuator lower bound (rpm)
+  setting_max: null               # actuator upper bound (rpm)
+  search_step: null               # candidate spacing (rpm), e.g. 100
+  supported_range_quantiles: [0.01, 0.99]   # candidates outside the training data's range are rejected
+  energy_objective:
+    # The telemetry schema has NO cooling-system power measurement (power_consumption_kw is per-server
+    # IT power). Leave null until a measured cooling-power column and a validated energy model exist.
+    measured_cooling_power_column: null
+  recommendation_only: true       # cannot be set to false

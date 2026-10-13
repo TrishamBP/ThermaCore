@@ -9,8 +9,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-State = Literal["NORMAL", "PARTIALLY_ASSESSED", "DATA_QUALITY_ISSUE", "POTENTIAL_AIRFLOW_ISSUE",
-                "RAPID_TEMPERATURE_RISE", "HIGH_THERMAL_LOAD", "INSUFFICIENT_DATA"]
+State = Literal["NORMAL", "LIGHT_LOAD", "PARTIALLY_ASSESSED", "DATA_QUALITY_ISSUE", "POTENTIAL_AIRFLOW_ISSUE",
+                "APPROACHING_THERMAL_LIMIT", "RAPID_TEMPERATURE_RISE", "HIGH_THERMAL_LOAD", "INSUFFICIENT_DATA"]
 Severity = Literal["INFO", "WARNING", "CRITICAL"]
 Direction = Literal["increasing", "decreasing", "stable"]
 
@@ -137,5 +137,7 @@ class CoolingStateSnapshot(_Model):
     rules_not_evaluated: list[RuleNotEvaluated]
     data_quality: DataQuality
     assets: list[AssetSummary] = Field(default_factory=list)   # data-center scope only
+    light_load_assets: list[str] = Field(default_factory=list)          # assets with a WL_LIGHT_LOAD finding
+    approaching_limit_assets: list[str] = Field(default_factory=list)   # assets with TH_APPROACHING_INLET_LIMIT
     source_type: str | None = None
     notes: list[str] = Field(default_factory=list)

@@ -25,7 +25,7 @@ def _persist(store, events):
 def test_initialize_is_repeatable_and_versioned(store):
     store.initialize()
     store.initialize()
-    assert store.schema_version() == 1
+    assert store.schema_version() == 2
     store.check_initialized()
     assert set(store.counts()) == {"assets", "telemetry_readings", "anomaly_records",
                                    "ingestion_batches", "parquet_exports"}

@@ -28,8 +28,8 @@ log = get_logger("database")
 
 
 class StoreFactory:
-    def __init__(self, settings: ConsumerSettings, connect_timeout_s: int) -> None:
-        self.settings, self.connect_timeout_s = settings, connect_timeout_s
+    def __init__(self, settings: ConsumerSettings, connect_timeout_s: int, query_timeout_s: float | None = None) -> None:
+        self.settings, self.connect_timeout_s, self.query_timeout_s = settings, connect_timeout_s, query_timeout_s
 
     def describe(self) -> str:
         """Backend and target without credentials."""
@@ -37,12 +37,13 @@ class StoreFactory:
             return f"postgres:{redact_url(self.settings.postgres_url)}"
         return f"sqlite:{self.settings.resolve_path(self.settings.sqlite_path)}"
 
-    def open(self, require_schema: bool = True) -> SqlTelemetryStore:
+    def open(self, require_schema: bool = True, read_only: bool = False) -> SqlTelemetryStore:
         try:
             # FastAPI runs the sync dependency, the sync handler and the teardown in different worker
             # threads; the per-request connection is used by them one after another, never concurrently.
             store = open_store(self.settings, connect_timeout_s=self.connect_timeout_s,
-                               sqlite_check_same_thread=False)
+                               sqlite_check_same_thread=False, read_only=read_only,
+                               query_timeout_s=self.query_timeout_s)
         except Exception as exc:
             log.error("telemetry store unavailable", extra={"context": {
                 "target": self.describe(), "error_type": type(exc).__name__}})
@@ -67,6 +68,15 @@ def get_store_factory(request: Request) -> StoreFactory:
 def get_db_session(request: Request) -> Iterator[SqlTelemetryStore]:
     """Per-request store connection (FastAPI dependency)."""
     store = get_store_factory(request).open()
+    try:
+        yield store
+    finally:
+        store.close()
+
+
+def get_read_session(request: Request) -> Iterator[SqlTelemetryStore]:
+    """Per-request READ-ONLY store connection (dashboard, telemetry, assets, copilot)."""
+    store = get_store_factory(request).open(read_only=True)
     try:
         yield store
     finally:

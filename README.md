@@ -1,1304 +1,1069 @@
-# Data Center Operations Intelligence: Data Engineering
+# ThermaCore: AI for Intelligent Data Center Operations
 
-AMD ACT III Hackathon. This repository builds the data layer for a platform that monitors one **hypothetical North American data center**. It turns a public Kaggle dataset into a stream of timestamped telemetry events, publishes them to **Apache Kafka**, consumes them into a database (SQLite or PostgreSQL) and a Parquet history queried with DuckDB, and estimates the current cooling/thermal state through a small read-only API. A dashboard and AI agents are later phases.
+AMD ACT III Hackathon project. ThermaCore ingests data center telemetry through Apache Kafka, stores it
+idempotently, assesses the thermal and cooling state of every server with deterministic rules, forecasts
+inlet temperature with XGBoost, and lets operators investigate through a LangGraph multi-agent
+recommendation workflow, a natural-language copilot and a digital-twin API built for a Three.js frontend.
 
-> **Data honesty, up front.** The Kaggle dataset describes itself as an *engineered synthetic dataset*. It has no timestamps and no equipment IDs. Every telemetry event in this project is **simulated** from it and labeled as such (`source_type: "simulated"`). None of it is real operational telemetry.
+> **Read this first.**
+> - **All telemetry is simulated.** The source Kaggle dataset describes itself as an *engineered synthetic
+>   dataset* with no timestamps and no equipment IDs. Every event is generated from it and labelled
+>   `source_type: "simulated"`. Nothing here is real operational telemetry.
+> - **Recommendation-only.** No endpoint, agent or tool can command fans, chillers or setpoints.
+> - **Backend only.** The repository has no frontend and no Three.js code. The digital twin is a backend
+>   (layout, state, overlays, SSE) with a documented contract for a future Three.js client.
+> - **The optimizer returns `UNAVAILABLE` on this data, by design.** The telemetry contains no cooling-system
+>   power and no fan→inlet response, so no energy saving can be claimed or computed. Energy waste is
+>   screened only as a **relative** indicator: fan speed against comparable peers, never in kW ([§14](#14-cooling-optimization-and-safety)).
+
+---
+
+## Documentation map
+
+| Document | What it covers |
+|---|---|
+| **README.md** (this file) | Overview, status, architecture, data flows, setup, configuration, API summary |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Component boundaries, detailed data flows, database model (ER), dataset and data quality, architecture decision records |
+| [docs/API.md](docs/API.md) | Every implemented endpoint: parameters, validation, responses, errors, side effects, `curl` examples |
+| [docs/ML_AND_OPTIMIZATION.md](docs/ML_AND_OPTIMIZATION.md) | XGBoost features, split, evaluation, artifacts, validity check, optimizer formulation and safety |
+| [docs/AGENT_ARCHITECTURE.md](docs/AGENT_ARCHITECTURE.md) | LangGraph recommendation workflow, copilot graph, tools, validation, Fireworks integration |
+| [docs/DIGITAL_TWIN.md](docs/DIGITAL_TWIN.md) | Layout model, identity mapping, state, overlays, SSE, Three.js integration and scaling |
+| [docs/PRODUCTION_READINESS.md](docs/PRODUCTION_READINESS.md) | Reliability, security, observability, testing strategy, deployment, scaling, performance, prioritized gap analysis |
+| [docs/PIPELINE_GUIDE.md](docs/PIPELINE_GUIDE.md) | Operating guide: Kafka producer, consumer, DLQ, Parquet, DuckDB, the cooling state estimator rules |
+| [docs/cooling_model_report.md](docs/cooling_model_report.md) | Measured results of the active model artifact (source of truth for model numbers) |
+| [docs/frontend_integration.md](docs/frontend_integration.md) | Contract for a future dashboard/copilot/Three.js frontend |
+| [docs/dataset/README.md](docs/dataset/README.md) | What the Kaggle dataset contains, inspected column by column |
 
 ---
 
 ## Contents
 
-- [A. Project overview](#a-project-overview)
-- [B. Architecture](#b-architecture)
-- [C. Kafka fundamentals, applied to `datacenter.telemetry`](#c-kafka-fundamentals-applied-to-datacentertelemetry)
-- [D. Project structure](#d-project-structure)
-- [E. Environment setup](#e-environment-setup)
-- [F. Running the producer](#f-running-the-producer)
-- [G. Example event](#g-example-event)
-- [H. Observing messages](#h-observing-messages)
-- [I. Reliability and troubleshooting](#i-reliability-and-troubleshooting)
-- [J. Data correctness and provenance](#j-data-correctness-and-provenance)
-- [K. Future integration](#k-future-integration)
-- [L. Limitations and next steps](#l-limitations-and-next-steps)
-- [Part II: Consumer, storage and analytics](#part-ii-consumer-storage-and-analytics)
-  - [II.1 Architecture](#ii1-end-to-end-architecture) · [II.2 Validation, transformation, batches](#ii2-what-validation-transformation-and-batch-writes-mean-here) · [II.3 Groups, offsets, retries, DLQ](#ii3-consumer-groups-partitions-offsets-commits-retries-dead-letters) · [II.4 At-least-once](#ii4-at-least-once-delivery-and-idempotent-writes) · [II.5 SQLite vs PostgreSQL](#ii5-sqlite-or-postgresql) · [II.6 Parquet and DuckDB](#ii6-parquet-for-history-duckdb-for-questions) · [II.7 Event schema](#ii7-event-schema-seen-by-the-consumer) · [II.8 Database schema](#ii8-database-schema) · [II.9 Parquet layout](#ii9-parquet-layout-and-schema) · [II.10 Setup and running](#ii10-setup-and-running) · [II.11 DuckDB queries](#ii11-querying-with-duckdb) · [II.12 Tests](#ii12-tests) · [II.13 Verifying counts](#ii13-verifying-counts-across-kafka-the-database-and-parquet) · [II.14 Troubleshooting](#ii14-troubleshooting)
-- [Part III: Cooling State Estimator](#part-iii-cooling-state-estimator)
-- [Appendix: Phase 1 (dataset → SQLite → simulation)](#appendix-phase-1-dataset--sqlite--simulation)
+1. [Project overview](#1-project-overview)
+2. [Problem statement and motivation](#2-problem-statement-and-motivation)
+3. [Features and implementation status](#3-features-and-implementation-status)
+4. [Technology stack](#4-technology-stack)
+5. [System architecture](#5-system-architecture)
+6. [End-to-end data flows](#6-end-to-end-data-flows)
+7. [Repository structure](#7-repository-structure)
+8. [Prerequisites and local setup](#8-prerequisites-and-local-setup)
+9. [Configuration reference](#9-configuration-reference)
+10. [API reference (summary)](#10-api-reference-summary)
+11. [Database and data model](#11-database-and-data-model)
+12. [Dataset and data quality](#12-dataset-and-data-quality)
+13. [XGBoost model and forecasting](#13-xgboost-model-and-forecasting)
+14. [Cooling optimization and safety](#14-cooling-optimization-and-safety)
+15. [LangGraph and multi-agent architecture](#15-langgraph-and-multi-agent-architecture)
+16. [Digital twin](#16-digital-twin)
+17. [Natural-language operations copilot](#17-natural-language-operations-copilot)
+18. [Reliability, security and observability](#18-reliability-security-and-observability)
+19. [Testing and evaluation](#19-testing-and-evaluation)
+20. [Deployment and scaling](#20-deployment-and-scaling)
+21. [Performance and cost engineering](#21-performance-and-cost-engineering)
+22. [Architectural decisions and trade-offs](#22-architectural-decisions-and-trade-offs)
 
 ---
 
-## A. Project overview
+## 1. Project overview
 
-**The platform** (end goal): ingest data center telemetry, detect anomalous behavior, and let AI agents investigate incidents and recommend evidence-based corrective actions.
+### What ThermaCore does
 
-**This repository today:**
+ThermaCore is an operations-intelligence backend for one hypothetical North American data center
+(`dc-na-sim-001`) with 20 simulated servers (`SIM-NA-001` … `SIM-NA-020` in the default run).
 
-| Phase | What | Status |
+1. **Telemetry.** A seeded simulator turns rows of the Kaggle dataset into one JSON event per server per
+   simulated minute. It publishes them to the Kafka topic `datacenter.telemetry`.
+2. **Ingestion.** A Kafka consumer validates every event against a versioned JSON Schema, stores it
+   idempotently in SQLite or PostgreSQL, sends bad messages to a dead-letter topic, and exports Parquet
+   history for DuckDB analytics.
+3. **Assessment.** The Cooling State Estimator, a deterministic rule engine, classifies each server and the
+   whole data center into states such as `HIGH_THERMAL_LOAD`, `APPROACHING_THERMAL_LIMIT` or
+   `DATA_QUALITY_ISSUE`, with evidence for each finding.
+4. **Forecasting.** Two XGBoost models predict inlet temperature 5 and 10 minutes ahead under the observed
+   operating conditions.
+5. **Optimization.** A constrained, recommendation-only optimizer is implemented. It refuses to evaluate
+   hypothetical settings unless the model passes an intervention-validity check, and it refuses to rank
+   settings by energy without measured cooling power. On this data it returns `UNAVAILABLE`.
+6. **Investigation.** A LangGraph workflow builds typed evidence deterministically. Specialist LLM agents
+   on Fireworks AI interpret it, and a plain-Python validator decides what becomes a recommendation for
+   human review. An operations copilot answers natural-language questions with read-only tools.
+7. **Digital twin API.** Facility layout with coordinates, per-server live state, overlays, an inspection
+   panel and Server-Sent Events, for a Three.js client that is not part of this repository.
+
+### Monitoring, forecasting, optimization and autonomous control
+
+| Capability | Question it answers | Status here |
 |---|---|---|
-| 1 | Download the Kaggle dataset, profile it, keep the North American (`NA`) rows, load everything into SQLite, generate a labeled synthetic 24-hour, 1-minute telemetry run | **Implemented** |
-| 2 | **Kafka producer**: turn simulated telemetry into validated JSON events and publish them to the Kafka topic `datacenter.telemetry`; local Kafka via Docker Compose; repeatable topic setup | **Implemented** |
-| 3 | Kafka **consumer** → validation, DLQ, idempotent batch persistence (SQLite / PostgreSQL), Parquet history, DuckDB analytics (Part II) | **Implemented** |
-| 4 | **Cooling State Estimator**: rules-based thermal/operational snapshot, served by the `app` API package at `GET /api/v1/telemetry/cooling-state` (Part III) | **Implemented** |
-| 5 | Further API endpoints, frontend/dashboard, AI agents, cooling optimization | Not implemented |
+| Monitoring | What is happening now, and how reliable is the data? | Implemented: estimator, dashboard, assets, twin state |
+| Forecasting | What will inlet temperature be in 5/10 min if nothing changes? | Implemented as a `forecasting_baseline`; it does not beat persistence on the test split |
+| Optimization | Which setting minimizes cooling energy while staying safe? | Implemented logic, **blocked by missing data**: returns `UNAVAILABLE` with reasons |
+| Energy-waste screening | Which fans run faster than comparable peers under similar conditions? | Implemented, **relative only** (no kW); most assets lack comparable peers |
+| Autonomous control | Apply the setting to the equipment | **Not implemented, deliberately.** No actuation path exists |
 
-**What the producer does.** It reads telemetry in one of two modes and publishes one JSON message per (asset, minute) to Kafka:
+### Who uses it and how
 
-- **`simulate`** (Mode B): generates telemetry *while publishing*, using the Phase 1 simulation engine (`TelemetrySimulator`). Finite by default; `--continuous` runs until stopped.
-- **`publish-stored`** (Mode A): streams a simulation run that Phase 1 already stored in SQLite.
+- **Operators**: dashboard overview, per-asset history, cooling state, alerts, copilot questions,
+  review decisions on recommendations (`APPROVED_FOR_EVALUATION`, `REJECTED`, `DEFERRED`).
+- **Reliability and facilities engineers**: recommendation evidence, execution traces, data-quality
+  findings, model evaluation and validity reports.
+- **Frontend developers**: the digital twin and dashboard contracts in
+  [docs/frontend_integration.md](docs/frontend_integration.md).
 
-Every event is validated against a versioned JSON Schema before sending, keyed by `asset_id`, and tracked until the broker confirms delivery.
+### Summary for a recruiter or engineering manager
+
+ThermaCore is a Python/FastAPI backend that streams simulated server telemetry through Kafka into an
+idempotent SQL store, evaluates thermal risk with deterministic rules, forecasts inlet temperature with
+XGBoost, and wraps it all in LangGraph agent workflows on Fireworks AI. The validator, not the LLM,
+controls every number and every recommendation. Its distinguishing engineering choice is that it **fails
+closed**: it reports clearly what the data cannot support (cooling energy, causal fan effects, real topology)
+instead of presenting synthetic correlations as savings. The test suite has 451 passing unit and API tests.
+
+### Status and the most important limitations
+
+- Implemented and tested: ingestion, storage, estimator, forecaster, optimizer logic, recommendation
+  workflow, copilot, digital twin backend, 29 API routes.
+- Not built: frontend, anomaly detector (only simulator-injected labels exist), any equipment control,
+  CI/CD, container image for the API, metrics/tracing.
+- Data limits: synthetic telemetry; no cooling power, setpoints, cooling efficiency or facility power;
+  no rack/room topology (the twin layout is a labelled demonstration).
+- Model limits: pooled RMSE skill against persistence is −4.0 % at 5 min and −1.4 % at 10 min (the model is
+  slightly *worse* than "no change"). See [docs/cooling_model_report.md](docs/cooling_model_report.md).
 
 ---
 
-## B. Architecture
+## 2. Problem statement and motivation
+
+### The operational problem
+
+A data center must remove the heat that its IT equipment produces, continuously, without letting server
+inlet air exceed the equipment's allowed envelope. ASHRAE TC 9.9 gives a *recommended* inlet range of
+18–27 °C for common equipment classes. Cooling capacity is usually provisioned and controlled with fixed
+policies: constant fan speeds, conservative setpoints, schedules. A fixed policy has to be sized for the
+worst case. When workload is light, it keeps removing heat that isn't there and spends fan and chiller
+energy for nothing. When workload rises quickly, a fixed policy reacts late.
+
+### Why "just minimize fan speed" is wrong
+
+Minimizing fan speed or cooling power alone is an unconstrained objective with a known bad optimum: zero
+cooling. The real problem is constrained:
+
+- **Safety constraint.** Inlet temperature must stay below a verified limit with margin, at every
+  forecast horizon, including the uncertainty of the forecast.
+- **Workload coupling.** Heat load follows compute load. A setting that is safe at 30 % CPU can be unsafe
+  at 90 %, so any recommendation is conditional on workload staying in the regime it was evaluated in.
+- **Equipment constraints.** Actuators have bounds, rate limits and minimum airflow requirements.
+- **Causality.** To claim that a lower fan speed is safe, you need to know how temperature *responds to
+  the fan*, not how temperature and fan speed co-varied historically.
+
+### Kinds of power, and what this dataset measures
+
+| Quantity | Meaning | In this telemetry? |
+|---|---|---|
+| Server (IT) power | Electrical power drawn by the server | **Yes**: `power_consumption_kw`, per server |
+| Cooling-system power | Fans, CRAH/CRAC units, chillers, pumps, cooling towers | **No** |
+| Facility power | Everything behind the utility meter: IT, cooling, UPS losses, lighting | **No** |
+| Total facility energy | Facility power integrated over time | **No** |
+| PUE | Facility energy ÷ IT energy | A per-asset `pue` value is carried in the simulated telemetry. It is **not** a measured facility ratio |
+
+Server power is **not** a proxy for cooling power. It mostly follows compute load. Lowering a fan may
+raise server power slightly (leakage current rises with temperature) while it lowers cooling power, so
+using IT power as the objective could reward exactly the wrong action. ThermaCore therefore never labels
+`power_consumption_kw` as cooling power, and the optimizer's energy objective stays unset
+(`optimizer.energy_objective.measured_cooling_power_column: null`).
+
+### Thermal anomalies, maintenance and stale data
+
+- Airflow degradation (clogged filters, failed fans, obstructions) shows up as falling airflow with rising
+  temperature, or as fan speed rising while airflow does not. The estimator has rules for both
+  (`AF_AIRFLOW_DROP_WITH_RISING_TEMPERATURE`, `AF_FAN_AIRFLOW_DIVERGENCE`). They are labelled *potential*
+  issues, not confirmed faults.
+- **Stale or missing data is a safety problem, not just a quality problem.** A reading from 20 minutes ago
+  that says 22 °C is not evidence that the inlet is 22 °C now. Treating a missing value as 0 would make a
+  dead sensor look like a cold server. ThermaCore keeps missing readings as explicit nulls, checks
+  freshness on two clocks (event time and wall-clock ingest time), and downgrades or blocks conclusions
+  when data is stale (see [§18](#18-reliability-security-and-observability)).
+
+### Why recommendations need evidence and explicit constraints
+
+An operator can only act on a recommendation they can check. Every recommendation here carries typed
+evidence items (`measured`, `derived`, `model_prediction`, `rule_finding`, `configuration`,
+`unavailable`) with stable IDs, the constraints that were checked, the missing evidence, the
+conditions that invalidate it, an uncertainty level with its basis, and `human_approval_required: true`.
+
+---
+
+## 3. Features and implementation status
+
+Status legend: **Implemented** (code + tests), **Partial** (works with stated gaps), **Prototype**
+(demonstration-grade), **Unavailable** (logic exists, blocked by missing data), **Planned/Not built**.
+
+| Feature | What it does | Implementation | Status | Important limitations |
+|---|---|---|---|---|
+| Dataset ingestion | Kaggle download, checksum manifest, load 100,000 rows into SQLite, NA filter | `src/data_engineering/ingestion/`, `processing/filter_region.py` | Implemented | Source is self-described synthetic |
+| Telemetry simulation | Seeded 1-minute series per asset, missing slots, injected anomalies (labelled) | `simulation/generate_telemetry.py`, `config/simulation.yaml` | Implemented | Inlet depends on workload only, never on fan speed |
+| Kafka producer | Schema-validated JSON events, key = `asset_id`, delivery tracking, pacing | `streaming/producer.py`, `events.py`, `telemetry_event.v1.schema.json` | Implemented | Single local broker, RF 1, no TLS/auth |
+| Kafka consumer + DLQ | Validate, batch transaction, idempotent on `event_id`, DLQ, safe offset commits | `streaming/consumer.py`, `event_validation.py`, `dead_letter.py` | Implemented | One consumer process tested per group |
+| Telemetry store | SQLite (default) or PostgreSQL, same SQL, schema v2 | `storage/`, `db/telemetry_store_{sqlite,postgres}.sql` | Implemented | No retention/pruning; no migration framework |
+| Parquet history + DuckDB | Ledgered, crash-safe export; SQL over Parquet in place | `storage/parquet_sink.py`, `analytics/` | Implemented | Not exposed over HTTP (CLI only) |
+| Cooling state estimator | Rules over a rolling window per asset; states, findings, evidence, DQ | `src/data_engineering/cooling/`, `config/cooling_state.yaml` | Implemented | Most limits unset by design → `PARTIALLY_ASSESSED` |
+| Dashboard and analytics API | KPIs, freshness, thermal risk, trends, anomaly labels, alerts | `src/app/dashboard/` | Implemented (API) | No dashboard UI |
+| Asset and historical telemetry API | Asset list/detail, raw or bucketed history, keyset cursor | `src/app/assets/`, `src/data_engineering/telemetry_query.py` | Implemented | Max 24 h range and 5,000 points per request (configurable) |
+| XGBoost thermal forecasting | Inlet forecast at +5/+10 min; versioned artifacts | `src/data_engineering/cooling_model/`, `src/app/cooling/` | Implemented, **baseline quality** | Does not beat persistence pooled; simulated data only |
+| Cooling optimization | Grid/candidate evaluation under T_safe, bounds, support range | `cooling_model/optimizer.py` | **Unavailable** on this data | No validated response, no cooling power, T_safe/bounds unset |
+| Energy-waste screening | Fan over-speed vs comparable peers (same cooling and asset type, matched workload and inlet); affinity-law relative fan power | `src/data_engineering/energy/fan_peer.py`, `GET /energy/fan-peer-comparison`, `ENERGY_WASTE` rule | Implemented, **relative only** | No kW or savings (no cooling power); association, not causation; 13 of 20 assets lack comparable peers at 14:00 |
+| Recommendation generation | LangGraph workflow, 6 recommendation types, validator, persistence, human decisions | `src/data_engineering/recommendations/`, `src/app/recommendations/` | Implemented | On current data almost all results are `INCONCLUSIVE` or not applicable; the exception is `ENERGY_WASTE` for SIM-NA-016 at 14:00 (`REQUIRES_REVIEW`, relative only) |
+| Alerts | WARNING/CRITICAL findings persisted **when an analysis runs** | `recommendations/graph.py: alert_rows`, `GET /alerts` | Partial | No continuous alerting; created only by `POST /recommendations/generate` |
+| Anomaly and maintenance analysis | Airflow rules, persistence across windows, history z-scores, maintenance triage | `cooling/rules.py`, `recommendations/evidence.py`, `copilot/tools.py` | Partial | No statistical anomaly **detector**; only rules + injected labels |
+| LangGraph orchestration | Two compiled `StateGraph`s with conditional routing and parallel fan-out | `recommendations/graph.py`, `copilot/graph.py` | Implemented | No checkpointer (no resumable runs) |
+| Operations copilot | Intent parsing, scoped read-only tools, number-checked answers, bounded memory | `src/data_engineering/copilot/`, `POST /copilot/chat` | Implemented | Keyword parser; in-process memory; topology words force a clarification |
+| Digital twin backend | Layout, state, overlays, inspection, analyze, SSE | `src/app/digital_twin/`, `src/data_engineering/digital_twin/layout.py` | Implemented (API) | Demonstration layout; no CFD; no airflow direction |
+| Three.js digital twin UI | 3D rendering, object picking | — | **Not built** | Contract only: [docs/frontend_integration.md](docs/frontend_integration.md) |
+| Spatial overlays | 9 overlay types with visual bands | `TwinService.overlays` | Implemented (API) | Bands are visual, not safety limits; `cooling_efficiency` always `UNAVAILABLE` |
+| Live state updates | One shared poller → diff → SSE fan-out with replay buffer | `src/app/digital_twin/stream.py` | Implemented | In-process; event IDs reset on restart; not multi-replica |
+| Access control | Opt-in static bearer token; asset scope | `src/app/common/security/auth.py` | Partial | One shared token; no users, roles or tenants |
+| Observability | JSON logs, request IDs, run summaries, agent traces with tokens/latency | `logging_utils.py`, `middleware.py`, `recommendation_analyses.trace_json` | Partial | No metrics endpoint, no tracing, no log rotation |
+| Evaluation | Offline forecast metrics vs persistence, segments, validity check | `cooling_model/evaluation.py`, `validity.py` | Partial | No agent-quality or energy-savings evaluation |
+| Equipment control | — | — | **Not built (deliberately)** | Requires safety review; see [§14](#14-cooling-optimization-and-safety) |
+
+---
+
+## 4. Technology stack
+
+Every entry below is verified in `pyproject.toml` and imported by project code.
+
+| Technology | Why | Owns | Does not own | Reasonable alternatives | Worth replacing? |
+|---|---|---|---|---|---|
+| **Python 3.13 + uv** | One language for data, ML, API and agents; uv gives a locked, reproducible environment (`uv.lock`) | Runtime, dependency resolution | — | Poetry, pip-tools | No: uv is fast and already locked |
+| **FastAPI + Uvicorn** | Typed request validation (Pydantic), OpenAPI at `/docs`, sync handlers in a threadpool, SSE via `StreamingResponse` | HTTP layer, validation, error rendering | Business logic (lives in `data_engineering`) | Flask, Django REST, Litestar | No. Revisit only for very high fan-out SSE |
+| **Pydantic v2 / pydantic-settings** | Strict schemas (`extra="forbid"`), env-based settings | API contracts, LLM output schemas, settings | Persistence | attrs + marshmallow | No |
+| **Apache Kafka 3.9.1 (KRaft, Docker)** | Durable, replayable, partitioned log between producer and consumers | Transport and retention (7 days) | Transformation, deduplication, system of record | Redpanda, Pulsar, Kinesis, direct DB writes | Redpanda is a drop-in local option; the design doesn't depend on Kafka-only features |
+| **confluent-kafka (librdkafka)** | Idempotent producer, delivery callbacks, AdminClient, Windows wheels | Client protocol | — | kafka-python, aiokafka | No |
+| **jsonschema** | One event contract (`telemetry_event.v1.schema.json`) validated by producer and consumer | Event validation | Schema evolution tooling | Schema Registry + Avro/Protobuf | Yes at scale, for compatibility enforcement |
+| **SQLite / PostgreSQL 16 (psycopg 3)** | SQLite needs nothing locally; PostgreSQL for concurrency. One hand-written SQL layer serves both | System of record for telemetry, recommendations, decisions, alerts | Long-horizon analytics | TimescaleDB, ClickHouse, InfluxDB | TimescaleDB is the natural next step (partitioning, retention, continuous aggregates) |
+| **PyArrow + Parquet, DuckDB** | Columnar, compressed, immutable history; SQL in place without loading | Historical analytics (CLI) | Transactions, serving the API | Spark, ClickHouse | Not at this scale |
+| **XGBoost 3.x (native API) + NumPy** | Strong on tabular lag features, handles NaN natively, fast CPU training, portable `.ubj` artifacts | Inlet forecasting | Causal/intervention estimates | LightGBM, linear AR models, LSTM/TFT | No evidence a deep model would help: the target is near-unpredictable noise by construction |
+| **LangGraph** | Explicit state graphs: conditional edges, parallel fan-out (`Send`), bounded loops (re-analysis), per-node traces | Orchestration of the two agent workflows | Numbers, rules, validation, persistence | Plain function pipeline, CrewAI, AutoGen | Possibly. A plain pipeline would also work; see ADR in [§22](#22-architectural-decisions-and-trade-offs) |
+| **LangChain (`langchain-fireworks`, `langchain-core`)** | `ChatFireworks.with_structured_output(method="function_calling")` for schema-bound tool calls with usage metadata | LLM client and structured output | Prompts' safety | Fireworks OpenAI-compatible SDK directly | Low value either way; it's a thin adapter (`recommendations/llm.py`) |
+| **Fireworks AI** | Hosted open models: `glm-5p3-flash` (main: planning, explanation) and `deepseek-v4p1-flash` (specialists) | LLM inference | Any decision that matters for safety | Other hosted APIs, self-hosted vLLM | Configurable through env vars; nothing is provider-specific beyond the adapter |
+| **Docker Compose** | Local Kafka broker and optional PostgreSQL | Local infrastructure | Deploying the API | — | — |
+| **pytest + httpx** | Unit, API (ASGI transport with the real lifespan), PostgreSQL-marked and Kafka-integration tests | Test harness | — | — | No |
+
+**Not used** (despite appearing in early designs): React/Next.js, Three.js, Redis, Prometheus,
+OpenTelemetry, an ORM, a vector store/RAG.
+
+---
+
+## 5. System architecture
 
 ```mermaid
 flowchart LR
-    subgraph implemented["Implemented"]
-        K[(Kaggle CSV<br/>green_ai_datacenter.csv<br/>100,000 rows)] --> P1[Phase 1 pipeline<br/>load, NA filter,<br/>validation]
-        P1 --> DB[(SQLite<br/>data/datacenter_ops.db<br/>source rows + stored runs)]
-        DB -->|NA baseline rows| SIM[TelemetrySimulator<br/>streaming, seeded]
-        DB -->|stored run| RD[stored-run reader]
-        SIM --> PR[Kafka producer<br/>validate → JSON →<br/>key=asset_id]
-        RD --> PR
-        PR -->|acks=all, idempotent| T[["Kafka topic<br/>datacenter.telemetry<br/>3 partitions"]]
+    subgraph ingest["Ingestion (asynchronous, streaming)"]
+        CSV[("Kaggle CSV<br/>100,000 rows")] --> P1["Phase 1: load, NA filter<br/>data/datacenter_ops.db"]
+        P1 --> SIM["TelemetrySimulator<br/>seeded, 1-min slots"]
+        SIM --> PROD["Kafka producer<br/>schema-validated"]
+        PROD --> TOPIC[["datacenter.telemetry<br/>3 partitions, key=asset_id"]]
+        TOPIC --> CONS["Consumer<br/>dco-telemetry-sink"]
+        CONS -->|invalid| DLQ[["datacenter.telemetry.dlq"]]
+        CONS -->|"1 txn per batch"| STORE[("Telemetry store<br/>SQLite / PostgreSQL<br/>schema v2")]
+        STORE -->|export ledger| PQ[("Parquet history")]
+        PQ --> DUCK["DuckDB CLI"]
     end
-        T --> C[Kafka consumer<br/>validate, dedupe by event_id]
-        C --> ST[(SQLite / PostgreSQL<br/>+ Parquet history + DuckDB)]
+
+    subgraph api["FastAPI app (synchronous request paths)"]
+        DASH["dashboard / assets / telemetry"]
+        COOL["cooling: predict / optimize"]
+        RECS["recommendations / alerts"]
+        COP["copilot/chat"]
+        TWIN["digital-twin: layout, state,<br/>overlays, assets, analyze"]
+        SSE["digital-twin/stream (SSE)<br/>shared poller, 10 s"]
     end
-    subgraph planned["Planned: NOT implemented"]
-        ST -.-> API[FastAPI]
-        API -.-> UI[Frontend / dashboard]
-        API -.-> AG[AI agents<br/>investigation and recommendations]
+
+    subgraph det["Deterministic layer (no LLM)"]
+        EST["Cooling state estimator<br/>rules + data quality"]
+        XGB["XGBoost forecaster<br/>models/cooling_response/ACTIVE"]
+        OPT["Optimizer<br/>fails closed"]
+        EVI["Evidence builder + rules<br/>+ validator"]
     end
+
+    subgraph agents["LangGraph workflows"]
+        RG["Recommendation graph"]
+        CG["Copilot graph"]
+    end
+
+    FW(["Fireworks AI<br/>GLM main / DeepSeek specialists"])
+    LAYOUT[("config/digital_twin_layout.yaml<br/>DEMONSTRATION")]
+
+    STORE -. read-only .-> DASH & COOL & TWIN & SSE & CG
+    DASH --> EST
+    COOL --> XGB --> OPT
+    RECS --> RG
+    RG --> EVI
+    EVI --> EST & XGB & OPT
+    RG -->|"persist analysis,<br/>recommendations, alerts"| STORE
+    COP --> CG
+    CG -->|scoped tools| EST & XGB & OPT
+    TWIN --> CG
+    TWIN --> LAYOUT
+    RG -. optional .-> FW
+    CG -. optional .-> FW
+
+    UI["Three.js / dashboard frontend<br/>NOT BUILT"]:::planned
+    UI -.-> TWIN & SSE & DASH & COP
+    classDef planned stroke-dasharray: 5 5,fill:#f6f6f6,color:#666
 ```
 
-**Flow, step by step**
+Solid arrows are implemented calls; dotted arrows are read-only store access or optional LLM calls; the
+dashed node is not implemented. Streaming happens only between the producer, Kafka and the consumer, and
+from the API to browsers over SSE. Every API request path is synchronous; LLM calls happen inside the
+request (`POST /recommendations/generate` can take tens of seconds with LLMs enabled).
 
-1. **Source data → SQLite (Phase 1).** The Kaggle CSV is loaded unchanged into `source_records`. The 28,801 rows with `datacenter_region = "NA"` are marked as the North American baseline.
-2. **Simulation.** `TelemetrySimulator` picks N distinct NA rows (seeded), turns each into a synthetic asset (`SIM-NA-001` …), and steps every asset forward one slot at a time. Values follow relationships fitted on the NA rows, so CPU tracks workload and airflow tracks fan speed. Missing readings and anomalies are injected and labeled.
-3. **Producer.** Each slot becomes an event. It is validated against `telemetry_event.v1.schema.json`, serialized to compact JSON, and handed to the Kafka client with key `asset_id`.
-4. **Kafka topic.** The broker appends the message to one of three partitions, chosen by hashing the key, and confirms the write.
+### Components and boundaries
 
-**Why the producer doesn't write to the database directly**
-
-- **Decoupling.** The producer only knows "publish an event". Storage, the API and detection are independent consumers that can be added, restarted or rewritten without touching it.
-- **Buffering.** If the database is slow or down, events wait safely in Kafka instead of being lost or blocking generation.
-- **Replay.** Kafka keeps the stream for the retention period (7 days here). A new consumer, such as a fixed anomaly detector, can re-read history from offset 0. A direct database write would be consumed once and gone.
-- **Fan-out.** The same event can feed storage, real-time detection and agents at once, each at its own pace.
-
----
-
-## C. Kafka fundamentals, applied to `datacenter.telemetry`
-
-| Concept | Plain language | In this project |
+| Component | Responsibility | Boundary (what it never does) |
 |---|---|---|
-| **Kafka** | A distributed, durable, append-only log. Programs write events to it and other programs read them later, at their own pace. | The event-streaming layer between the simulator and everything downstream. |
-| **Broker** | One Kafka server process that stores data and serves clients. Production clusters have several. | One broker in the `dco-kafka` container (`apache/kafka:3.9.1`, KRaft mode, no ZooKeeper), reachable at `127.0.0.1:9092`. |
-| **Topic** | A named stream of related events. | `datacenter.telemetry`: one message per asset per simulated minute. |
-| **Producer** | A client that writes messages to a topic. | `data_engineering.streaming.producer` (confluent-kafka). |
-| **Consumer** | A client that reads messages from a topic and tracks its position. | Not built yet. Today you can read with `kafka-console-consumer.sh` (section H). |
-| **Partition** | A topic is split into ordered sub-logs so it can scale. **Order is guaranteed only within a partition.** | 3 partitions. In the 20-asset run they hold 6, 7 and 7 assets. |
-| **Offset** | A message's position in its partition (0, 1, 2, …). Consumers remember "I've processed up to offset N". | After one 24-hour run: offsets 0–8,639 in partition 0 (6 assets × 1,440) and 0–10,079 in partitions 1 and 2. |
-| **Message key** | Optional bytes attached to a message. The default partitioner hashes the key, so **the same key always goes to the same partition**. | Key = `asset_id`. All of `SIM-NA-001`'s readings land in one partition, in time order. Verified: every key maps to exactly one partition. |
-| **Buffering (producer side)** | `produce()` only puts the message into a **local in-memory queue**. A background thread batches messages and sends them. The broker's acknowledgment arrives later through a **delivery callback**. | That's why the producer reports `queued` and `delivered` separately. Batching: `linger.ms=20`, `batch.size=64 KiB`, `lz4` compression. |
-| **Decoupling** | Producer and consumers never talk to each other. They only share the topic. Either can run, stop or restart without the other. | The producer can publish a day of telemetry before any consumer exists. A consumer started tomorrow can still read it from offset 0. |
-| **Slow consumer** | Kafka keeps messages for the retention period whether or not anyone reads them. A slow consumer simply falls behind (its *lag* grows) and the producer is unaffected. If it falls behind by more than the retention period, old messages are deleted before it reads them. | Retention is 7 days (`retention.ms=604800000`). A full 24-hour run is ~28,800 messages of ~1.7 KB each, roughly 48 MB uncompressed. |
-| **Kafka temporarily unavailable** | The client keeps queued messages in memory and retries until `delivery.timeout.ms`. If the broker comes back in time, they're delivered. If not, each message's callback reports a timeout. If the local queue fills, `produce()` raises `BufferError`. | `delivery.timeout.ms=120000` (2 min). On `BufferError` the producer waits (serving callbacks) and retries, so nothing is dropped. Timed-out messages are counted as `failed` and the exit code is 1. |
-| **Persistence guarantees** | Acknowledged messages are written to the broker's log and survive consumer restarts. Durability depends on replication: with **one broker and replication factor 1, a lost disk or deleted container loses the data**. Kafka also does not deduplicate by content or validate payloads. | Local dev only: `docker compose down` deletes the topic data. Consumers must deduplicate using `event_id`. |
+| Simulator + producer (`streaming/producer.py`) | Generate events, validate, publish with key `asset_id` | Never writes the store |
+| Kafka | Durable buffer, replay, fan-out | Not the system of record; no dedup; no validation |
+| Consumer (`streaming/consumer.py`) | Validate, persist batches, DLQ, commit offsets only after durability | No analytics |
+| Telemetry store (`storage/base.py`) | System of record; parameterized SQL only | No business rules |
+| Estimator (`cooling/estimator.py`) | Deterministic state + findings + data quality | Never optimizes or calls an LLM |
+| Forecaster (`cooling_model/predictor.py`) | Forecast under observed conditions | Never evaluates hypothetical settings unless `intervention_validated` |
+| Optimizer (`cooling_model/optimizer.py`) | Feasibility under T_safe/bounds/support | Never actuates (`recommendation_only` cannot be disabled) |
+| Recommendation graph (`recommendations/graph.py`) | Orchestrate evidence → agents → validator → persistence | Agents never query data or emit numbers |
+| Copilot graph (`copilot/graph.py`) | Question → scoped read-only tools → validated answer | No SQL from the LLM; no write tools |
+| Digital twin (`app/digital_twin/`) | Join layout with state, overlays, SSE | Not a physics simulation; layout is illustrative |
+| API (`app/`) | Validation, auth, scope, error contract, lifecycle | Domain logic stays in `data_engineering` |
+
+### Sources of truth
+
+| Data | Source of truth | Notes |
+|---|---|---|
+| Telemetry | `telemetry_readings` in the telemetry store | Kafka is transport; Parquet is derived from the store |
+| Asset identity | `assets` keyed by `(simulation_run_id, asset_id)` | IDs repeat across runs, so every query is run-scoped |
+| Facility layout | `config/digital_twin_layout.yaml` | Maps `srv-013` → `SIM-NA-013`; demonstration only |
+| Thresholds and constraints | `config/cooling_state.yaml` (limits), `config/cooling_model.yaml` (`optimizer.*`) | Unset values are `null` and disable the dependent rule |
+| Predictions | The `ACTIVE` artifact in `models/cooling_response/` | Computed on request; not stored |
+| Recommendations, decisions, alerts | `recommendations`, `recommendation_decisions`, `alerts` tables | Written only by the recommendation workflow and the decision endpoint |
+| Conversation context | In-process `ConversationStore` | Lost on restart, by design |
+
+Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ---
 
-## D. Project structure
+## 6. End-to-end data flows
 
-Files added or changed for the Kafka producer are marked **(new)** or **(changed)**.
+Each flow is summarized here and traced function by function in
+[docs/ARCHITECTURE.md §2](docs/ARCHITECTURE.md#2-end-to-end-data-flows).
 
-```
-docker-compose.yml                           single local Kafka broker (127.0.0.1); optional `postgres` profile (Part II)
-.env.example                                 (changed) every Kafka/producer setting with its default
-pyproject.toml / uv.lock / requirements.txt  (changed) + confluent-kafka, jsonschema, python-dotenv; dev: numpy
-config/simulation.yaml                       (changed) + streaming.data_center_id
-src/data_engineering/
-  streaming/                                 (new) everything Kafka-related
-    producer.py                              CLI + TelemetryPublisher (validate, produce, delivery tracking, flush) + Pacer
-    settings.py                              ProducerSettings: env/.env loading, validation, librdkafka config
-    events.py                                build_event, to_json_value (NumPy/pandas/NaN handling), validate_event, serialize_event
-    telemetry_event.v1.schema.json           the versioned event contract (JSON Schema 2020-12)
-    sources.py                               event sources: simulated_events (Mode B), stored_run_events (Mode A)
-    topic_setup.py                           idempotent topic creation + description
-    inspect_stream.py                        text filter over kafka-console-consumer output (counts, keys, order, duplicates)
-    consumer.py                              (Part II) consumer CLI: batches, OffsetTracker, retries, DLQ, shutdown
-    event_validation.py                      (Part II) consumer-side parsing/validation with stable reason codes
-    dead_letter.py                           (Part II) DLQ record format and confirmed publishing
-  storage/                                   (Part II) base.py (shared SQL, idempotency, export ledger),
-                                             sqlite_store.py, postgres_store.py, parquet_sink.py
-  analytics/                                 (Part II) duckdb_queries.py (TelemetryAnalytics), query_telemetry.py (CLI)
-  simulation/generate_telemetry.py           (changed) refactored into a streaming TelemetrySimulator; output of
-                                             the stored Phase 1 run is byte-identical (verified by its content hash)
-  ingestion/, processing/, validation/,      Phase 1 (see appendix)
-  pipeline.py, db.py, config.py, ...
-db/schema.sql, db/init_db.py                 Phase 1 SQLite schema
-db/telemetry_store_{sqlite,postgres}.sql     (Part II) consumer store schema; db/init_telemetry_store.py applies it
-tests/
-  kafka_fakes.py                             (new) in-memory fake Producer, so unit tests need no broker
-  test_kafka_events.py                       (new) schema, serialization, nulls, NumPy/pandas normalization, timestamps
-  test_kafka_sources.py                      (new) counts, stable IDs, reproducibility, continuous mode, stored-run replay
-  test_kafka_producer.py                     (new) topic/key, delivery failures, queue full, flush, shutdown, config, CLI exit codes
-  integration/test_kafka_integration.py      (new) real-broker round trip (marked `integration`)
-  test_ingestion.py, test_database.py, test_simulation.py   Phase 1
-.claude/skills/                              project skills; kafka-streaming updated with the implemented setup
-```
+**A. Telemetry ingestion.** `producer.py simulate` builds an event per (asset, slot) in
+`events.build_event` and validates it against `telemetry_event.v1.schema.json`. It publishes with
+`acks=all` and idempotence on. Event time is simulated (`start + slot_index × 60 s`); the Kafka record
+timestamp stays publish time, so retention works. The consumer polls up to 1,000 messages or 2 s, validates
+each one (`event_validation.py`), and writes the batch in one transaction (`SqlTelemetryStore.persist_batch`).
+Inserts are idempotent on `event_id`; a duplicate with different content is counted as `rows_conflicting`,
+and the first version wins. Invalid messages go to the DLQ with a reason code. Offsets are committed only
+after the DB commit and DLQ confirmation, and only up to the contiguous handled prefix. Missing readings
+are stored as `reading_status='missing'` with NULL metrics, never zeros. Readings are queryable through
+the API as soon as the batch commits.
 
-**Why confluent-kafka.** It wraps librdkafka, the C client used by most non-Java Kafka clients. It is actively maintained, ships Windows wheels for Python 3.13 (version 2.16.0 / librdkafka 2.16.0 here), and supports idempotent producers, delivery callbacks and the AdminClient used for topic creation. `kafka-python` is pure Python and simpler to install, but its idempotence and maintenance history are weaker.
+**B. Dashboard query.** `GET /dashboard/overview` → `DashboardService.overview`. It resolves the run (default:
+the run whose assets were updated most recently), applies the operator scope, and gets each asset's latest
+*observed* reading with one aggregate query (`store.latest_observed`). It computes KPIs across assets,
+freshness (event time, `stale_after_seconds`) and pipeline staleness (wall clock,
+`max_ingest_age_seconds`). It then runs the estimator for thermal risk and builds per-asset 5-minute
+trend buckets. An empty run gives `404 unknown_run`; stale data gives `warnings`, not errors.
 
-**Why `apache/kafka:3.9.1`.** It's the official Apache image, runs KRaft (no ZooKeeper container), and the tag is pinned so everyone runs the same broker. librdkafka 2.16 fully supports Kafka 3.9.
+**C. Thermal prediction.** `POST /cooling/predict` → `CoolingModelService.predict_v2`. It checks availability
+(model loaded, feature config unchanged, optional max age), then calls `CoolingResponseModel.predict_for_asset`.
+That reads the last 16 minutes of readings (`lookback_minutes + 1`) and builds features with the same code as
+training (`features.build_features`). The two boosters predict the inlet **change**, and the response returns
+`inlet(t) + Δ̂` next to persistence and the offline RMSE.
+
+**D. Cooling optimization.** `POST /cooling-optimizer/recommend` or `/cooling/optimize` →
+`optimizer.recommend`. It first forecasts under current conditions, then collects blocking reasons:
+`RESPONSE_MODEL_NOT_VALIDATED`, `ENERGY_OBJECTIVE_MISSING`, `T_SAFE_NOT_CONFIGURED`,
+`ACTUATOR_BOUNDS_NOT_CONFIGURED`. With any blocking reason the status is `UNAVAILABLE` and candidates are
+listed as not evaluated. With all constraints present the best possible status is `CONSTRAINTS_ONLY`, because
+no energy model exists.
+
+**E. Multi-agent investigation.** `POST /recommendations/generate` → `RecommendationEngine.analyze` → compiled
+`StateGraph`: `load_telemetry` (all DB reads) → `validate_telemetry` → `assess_cooling_state` (evidence +
+deterministic rule candidates) → `plan_analysis` (main LLM) → specialist agents in parallel →
+`validate_evidence` (bounded re-analysis) → `evaluate_candidates` (validator) → `rank_recommendations` →
+`generate_explanation` (LLM, number-checked, template fallback) → `persist_recommendation`.
+
+**F. Digital twin interaction.** The client loads `GET /digital-twin/layout` and builds meshes keyed by `id`,
+with `asset_id` in `userData`. It fetches `GET /digital-twin/state`, colours with `GET /digital-twin/overlays`,
+subscribes to `GET /digital-twin/stream`, and on click calls `GET /digital-twin/assets/{object_id}` and
+`POST /digital-twin/analyze`. Identity is resolved by layout `id`, never by mesh position.
+
+**G. Recommendation lifecycle.** Evidence (deterministic) → rule candidate (`rules.py`) → agent finding
+(optional LLM) → validator status `REQUIRES_REVIEW` or `INCONCLUSIVE` → persisted with a deterministic ID
+`rec-sha256(run|asset|type|window_end)[:20]` (deduplicated) → listed (`GET /recommendations`) → human
+decision appended (`POST /recommendations/{id}/decisions`). The latest decision is the review status
+(`PENDING_REVIEW` if none). There is no "resolved" state and no execution step.
 
 ---
 
-## E. Environment setup
+## 7. Repository structure
 
-Commands were run on Windows 11 in **Git Bash** and checked in **Windows PowerShell 5.1** where syntax differs.
+```
+.
+├── README.md                         this file
+├── CLAUDE.md                         project rules for AI-assisted development
+├── pyproject.toml / uv.lock          dependencies (uv); requirements.txt is exported from the lock
+├── docker-compose.yml                Kafka 3.9.1 (KRaft) on 127.0.0.1:9092; optional `postgres` profile on :55432
+├── .env.example                      every environment variable with its default (no secrets)
+├── config/
+│   ├── simulation.yaml               simulator: seed, start, 1,440 slots, workload, noise, anomaly injection
+│   ├── cooling_state.yaml            estimator window, data-quality tolerances, limits (5 reference values, rest null)
+│   ├── cooling_model.yaml            XGBoost features/params/split, validity check, optimizer constraints (null)
+│   ├── recommendations.yaml          agent workflow heuristics (history windows, persistence, re-analysis)
+│   └── digital_twin_layout.yaml      DEMONSTRATION facility layout: room, aisles, racks, 20 servers, 2 CRAH
+├── db/
+│   ├── schema.sql / init_db.py       Phase 1 database (data/datacenter_ops.db)
+│   └── telemetry_store_{sqlite,postgres}.sql, init_telemetry_store.py   telemetry store, schema v2
+├── docs/                             see the documentation map above
+├── models/cooling_response/          trained artifacts (committed, ~1.2 MB): <version>/model_h5.ubj, model_h10.ubj, metadata.json; ACTIVE
+├── src/
+│   ├── data_engineering/             pipeline, analytics, ML, agents (no HTTP)
+│   │   ├── ingestion/                download_dataset.py (Kaggle + MANIFEST), load_source.py
+│   │   ├── processing/               filter_region.py (NA subset)
+│   │   ├── simulation/               generate_telemetry.py (TelemetrySimulator, METRICS)
+│   │   ├── validation/               validate_dataset.py (Phase 1 checks → data/processed/validation_report.md)
+│   │   ├── streaming/                producer, consumer, event schema, DLQ, settings, topic_setup, inspect_stream
+│   │   ├── storage/                  base.py (shared SQL, idempotency, export ledger, read queries), sqlite/postgres stores, parquet_sink
+│   │   ├── analytics/                duckdb_queries.py, query_telemetry.py (CLI)
+│   │   ├── cooling/                  estimator.py, rules.py, metrics.py, models.py (CoolingStateSnapshot), config.py
+│   │   ├── cooling_model/            features, dataset, training, evaluation, validity, artifacts, predictor, optimizer, config
+│   │   ├── recommendations/          graph.py (LangGraph), evidence.py, rules.py, validator.py, specialists.py, llm.py, schemas.py, cli.py
+│   │   ├── copilot/                  graph.py (LangGraph), understanding.py, tools.py, memory.py, schemas.py
+│   │   ├── digital_twin/layout.py    layout parsing/validation/versioning, LayoutProvider (reload on change)
+│   │   ├── telemetry_query.py        shared read-only query helpers, units, aggregation semantics
+│   │   └── pipeline.py, db.py, config.py, paths.py, logging_utils.py
+│   └── app/                          FastAPI package
+│       ├── main.py                   create_app() + lifespan (the only entry point: app.main:app)
+│       ├── config.py                 AppSettings (API_* variables)
+│       ├── database.py               StoreFactory, get_db_session, get_read_session
+│       ├── middleware.py             request ID + access log, security headers, CORS
+│       ├── exceptions.py             AppError hierarchy → {"error": {...}, "request_id"}
+│       ├── api/v1/router.py          /health + mounts every domain behind require_operator
+│       ├── common/                   schemas (CustomModel, UtcDatetime), security (auth, headers), pagination, logging
+│       ├── telemetry/                GET /telemetry/cooling-state
+│       ├── dashboard/                GET /dashboard/overview
+│       ├── assets/                   GET /telemetry, /assets, /assets/{id}, /assets/{id}/telemetry
+│       ├── cooling/                  /cooling-model/*, /cooling-optimizer/recommend, /cooling/{predict,optimize}
+│       ├── recommendations/          /recommendations/*, /alerts/*
+│       ├── copilot/                  POST /copilot/chat (+ build_copilot)
+│       └── digital_twin/             /digital-twin/* and the SSE broadcaster (stream.py)
+└── tests/                            unit, API, security, PostgreSQL-marked and Kafka integration tests (+ helpers and fakes)
+```
 
-### 1. Prerequisites
+Generated and gitignored: `data/` (raw download, SQLite databases, Parquet), `logs/`, `.env` and `graphify-out/`. The trained model artifacts in `models/` **are** committed.
 
-- Python 3.13+, [uv](https://docs.astral.sh/uv/) (`uv --version`), Docker Desktop (running).
+---
 
-### 2. Install dependencies (creates `.venv`)
+## 8. Prerequisites and local setup
+
+### What you need
+
+| Requirement | Version / note | Check |
+|---|---|---|
+| OS | Developed and run on Windows 11 (Git Bash and PowerShell). Linux/macOS should work but were not run | — |
+| Python | ≥ 3.13 (`requires-python`) | `python --version` |
+| uv | Package manager | `uv --version` |
+| Docker Desktop | Runs the Kafka broker (and optional PostgreSQL). **Required to populate the telemetry store**: the consumer is the only writer of telemetry | `docker compose version` |
+| Disk | About 25 MB of raw data plus small databases; Parquet history is about 2 MB per 24 h run | — |
+| Kaggle access | The public dataset downloads anonymously with Kaggle CLI 2.x. If asked, use `uv run kaggle auth login` or set `KAGGLE_API_TOKEN` | — |
+| Fireworks API key | **Optional.** Without it every agent workflow runs deterministically | — |
+
+### Works without any credentials vs. needs a provider key
+
+| Without `FIREWORKS_API_KEY` | Needs `FIREWORKS_API_KEY` |
+|---|---|
+| Everything except LLM text: ingestion, store, estimator, dashboard, assets, forecasting, optimizer, twin, SSE, recommendations (`mode: deterministic`, template explanations), copilot (keyword parser, deterministic summary) | LLM planning, specialist interpretations, LLM explanations and copilot answers (`mode: llm`) |
+
+### Step by step (dependency order matters)
+
+Commands are for Git Bash; PowerShell differences are noted. Run them from the repository root.
 
 ```bash
+# 1. Install dependencies into .venv (includes the dev group: pytest, httpx, psycopg)
 uv sync
 ```
-
-You don't need to activate the virtual environment: `uv run <command>` always uses `.venv`. If you prefer activating it:
-
-```bash
-source .venv/Scripts/activate        # Git Bash (Windows)
-source .venv/bin/activate            # macOS / Linux
-```
-```powershell
-.\.venv\Scripts\Activate.ps1         # PowerShell (needs ExecutionPolicy RemoteSigned or looser)
-```
-
-### 3. Build the Phase 1 data the producer depends on (once)
-
-The producer reads its baseline rows (and stored runs) from SQLite:
+Expected: `.venv/` is created. Verify: `uv run python -c "import xgboost, langgraph, fastapi; print('ok')"`.
 
 ```bash
+# 2. Optional: local settings (all defaults work without it). Never commit .env.
+cp .env.example .env               # PowerShell: Copy-Item .env.example .env
+```
+To enable LLM agents, set `FIREWORKS_API_KEY=<your key>` in `.env`. Precedence is: CLI flag > real
+environment variable > `.env` > built-in default.
+
+```bash
+# 3. Phase 1: download the dataset, load SQLite, filter NA rows, store a 24 h simulation, validate
 uv run python -m data_engineering.pipeline
 ```
-
-This downloads the dataset, loads SQLite, generates the stored run and validates (20/20 checks). Details are in the appendix.
-
-### 4. Configure `.env` (optional)
-
-All settings have working defaults, so this step is only needed to change something.
+Expected: `data/raw/hyperscale-data-center-dataset/` with `MANIFEST.json`, `data/datacenter_ops.db`, and
+`data/processed/validation_report.md`. Exit code 0 means validation passed. Re-running is idempotent. The
+command takes no flags (`--help` runs the pipeline too).
 
 ```bash
-cp .env.example .env                 # Git Bash
-```
-```powershell
-Copy-Item .env.example .env          # PowerShell
-```
-
-Precedence: CLI flag > real environment variable > `.env` > built-in default.
-
-### 5. Start Kafka
-
-```bash
-docker compose up -d --wait kafka    # waits until the health check passes
-docker compose ps                    # expect: dco-kafka ... (healthy)  127.0.0.1:9092->9092/tcp
-```
-
-### 6. Create and verify the topic (repeatable)
-
-```bash
+# 4. Start Kafka and create the topics (idempotent)
+docker compose up -d --wait kafka
 uv run python -m data_engineering.streaming.topic_setup
-# topic datacenter.telemetry: created, 3 partitions, 1 broker(s)
-# topic datacenter.telemetry.dlq: created, 3 partitions, 1 broker(s)     <- dead-letter topic for the consumer
-# (second run)  ... already existed ...
 ```
-
-The broker has automatic topic creation **disabled**, so a typo in a topic name fails loudly instead of silently creating a new topic. `topic_setup` never alters an existing topic; it reports a partition-count mismatch instead.
-
-### 7. Verify broker connectivity
+Expected: `docker compose ps` shows `dco-kafka … (healthy)` and the topic tool prints
+`topic datacenter.telemetry: created, 3 partitions` and the same for `datacenter.telemetry.dlq`
+(`already existed` on later runs). Use `127.0.0.1`, not `localhost`, from the host (see
+[PIPELINE_GUIDE §I](docs/PIPELINE_GUIDE.md#i-reliability-and-troubleshooting)).
 
 ```bash
-docker compose exec kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --describe --topic datacenter.telemetry
-docker compose exec kafka /opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 | head -1
+# 5. Initialize the telemetry store (SQLite by default: data/telemetry_store.db, schema v2)
+uv run python db/init_telemetry_store.py
 ```
-
-> **Git Bash only:** prefix `docker compose exec` commands with `MSYS_NO_PATHCONV=1` (or `export MSYS_NO_PATHCONV=1` once). Otherwise Git Bash rewrites `/opt/kafka/bin/...` into a Windows path. PowerShell doesn't need this.
->
-> Inside the container, `localhost:9092` is correct. From your machine, use `127.0.0.1:9092` (see section I).
-
----
-
-## F. Running the producer
-
-All commands: `uv run python -m data_engineering.streaming.producer <mode> [options]`. Use `--help` on either mode for the full list.
-
-| Option | Modes | Meaning |
-|---|---|---|
-| `--assets N` | simulate | number of simulated assets (default 20, max = number of NA rows) |
-| `--duration-minutes M` | simulate | simulated duration (default 1440). In continuous mode, the anomaly window length |
-| `--interval-seconds S` | simulate | seconds between readings (default 60) |
-| `--start 2026-01-01T00:00:00Z` | simulate | simulation start, UTC with trailing `Z` |
-| `--seed N` | simulate | random seed (default 42) |
-| `--missing-rate P` | simulate | probability a slot has no reading (default 0.01) |
-| `--continuous` | simulate | keep generating until Ctrl+C or `--max-events` |
-| `--run-id ID` | publish-stored | which stored run (default: latest) |
-| `--max-events N` | both | stop after N events |
-| `--rate R` | both | R events per second |
-| `--speedup X` | both | X simulated seconds per real second (`--rate` and `--speedup` are mutually exclusive) |
-| `--bootstrap-servers`, `--topic` | both | override `KAFKA_BOOTSTRAP_SERVERS` / `KAFKA_TOPIC` |
-| `--dry-run` | both | validate and print events as JSON lines; nothing is sent |
-| `--config PATH` | both | alternative simulation YAML |
-
-Defaults for `simulate` come from `config/simulation.yaml`. Finite mode is the default, so a plain command can never start an endless stream.
-
-**Small finite run (30 events)**
+Expected: `initialized sqlite:...telemetry_store.db (schema version 2)`. This must run before the
+consumer and the API; otherwise they report `store_not_initialized`.
 
 ```bash
-uv run python -m data_engineering.streaming.producer simulate --assets 3 --duration-minutes 10
-# SUCCESS: attempted=30 delivered=30 rejected=0 failed=0 undelivered=0 (queued=30)
-```
-
-**Full 24-hour, one-minute simulation (20 × 1,440 = 28,800 events; ~14 s unthrottled)**
-
-```bash
+# 6. Publish the 24 h default run (20 assets × 1,440 minutes = 28,800 events), then consume it
 uv run python -m data_engineering.streaming.producer simulate
-# same as: simulate --assets 20 --duration-minutes 1440 --interval-seconds 60
+uv run python -m data_engineering.streaming.consumer --idle-timeout-s 10
 ```
-
-With the default config this is run `sim-c9944cc35156`, identical to the Phase 1 stored run.
-
-**Accelerated / paced simulation**
+Expected: the producer prints `SUCCESS: attempted=28800 delivered=28800 …` (exit 0). The consumer stops
+10 s after the last message. To keep it streaming, run the consumer without `--idle-timeout-s` in one
+terminal and `producer simulate --continuous --speedup 60` in another (one simulated minute per second).
 
 ```bash
-# 1 simulated minute per real second -> 24 h in 24 min
-uv run python -m data_engineering.streaming.producer simulate --speedup 60
-# 24 h in about 1 minute
-uv run python -m data_engineering.streaming.producer simulate --speedup 1440
-# real time (one reading per asset per minute)
-uv run python -m data_engineering.streaming.producer simulate --speedup 1
-# fixed rate regardless of simulated time
-uv run python -m data_engineering.streaming.producer simulate --rate 50
+# 7. Optional: retrain the forecaster on your own store (a trained artifact is already committed in models/)
+uv run python -m data_engineering.cooling_model.training
 ```
-
-`--speedup` controls **when** an event is sent. It never changes `event_timestamp`.
-
-**Continuous run** (stop with Ctrl+C; the producer flushes and prints the summary)
+The committed artifact `crm-20261013T120438Z-1443761922fc8cc7` is loaded at startup, so this step is only
+needed after changing data or `config/cooling_model.yaml` (a feature-config change makes `/cooling/*` report
+`FEATURE_SCHEMA_MISMATCH` until you retrain). Retraining creates a new version directory. Expected: JSON with `version`, `model_label: "forecasting_baseline"`, test metrics, and the validity
+reasons. `models/cooling_response/ACTIVE` names the new artifact. It needs at least one run of ≥ 60 minutes
+and ≥ 2,000 training rows per horizon. If no artifact is present the API still starts; model endpoints return
+`503 model_not_trained` or `status: UNAVAILABLE`.
 
 ```bash
-uv run python -m data_engineering.streaming.producer simulate --continuous --speedup 60
-uv run python -m data_engineering.streaming.producer simulate --continuous --max-events 5000
+# 8. Start the API
+uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
-
-After the first `--duration-minutes` window, time continues (`2026-01-02T00:00:00Z`, …), the signal carries on smoothly, and anomalies are re-placed for each window (IDs like `<run>-W001-A003`).
-
-**Publish existing (stored) telemetry: Mode A**
+Verify:
+```bash
+curl http://127.0.0.1:8000/api/v1/health      # {"status":"ok","database":"sqlite","schema_version":2}
+```
+Interactive docs: http://127.0.0.1:8000/docs (disable with `API_DOCS_ENABLED=false`).
 
 ```bash
-uv run python -m data_engineering.streaming.producer publish-stored                       # latest run
-uv run python -m data_engineering.streaming.producer publish-stored --run-id sim-c9944cc35156
-# SUCCESS: attempted=28800 delivered=28800 ...
+# 9. Tests (no broker needed)
+uv run pytest
 ```
 
-Rows are streamed from SQLite with a cursor (`ORDER BY slot_index, asset_id`), not loaded all at once. The events are identical to `simulate` for the same run, except `provenance.published_from = "stored_run"`. A unit test asserts this.
+**Frontend:** there is none to start. See [docs/frontend_integration.md](docs/frontend_integration.md).
 
-**Inspect events without Kafka**
+**Optional PostgreSQL:** set `POSTGRES_PASSWORD`, `TELEMETRY_DB_BACKEND=postgres` and
+`TELEMETRY_POSTGRES_URL=postgresql://dco:<password>@127.0.0.1:55432/dco` in `.env`. Then run
+`docker compose --profile postgres up -d --wait postgres` and repeat steps 5–8. Details:
+[PIPELINE_GUIDE §II.10](docs/PIPELINE_GUIDE.md#ii10-setup-and-running).
 
-```bash
-uv run python -m data_engineering.streaming.producer simulate --assets 2 --duration-minutes 2 --dry-run
-```
-
-**Change broker or topic**
-
-```bash
-uv run python -m data_engineering.streaming.topic_setup --topic datacenter.telemetry.dev
-uv run python -m data_engineering.streaming.producer simulate --topic datacenter.telemetry.dev --bootstrap-servers 127.0.0.1:9092
-KAFKA_TOPIC=datacenter.telemetry.dev uv run python -m data_engineering.streaming.producer simulate   # Git Bash
-```
-```powershell
-$env:KAFKA_TOPIC = "datacenter.telemetry.dev"; uv run python -m data_engineering.streaming.producer simulate
-Remove-Item Env:KAFKA_TOPIC
-```
-
-**Exit status:** `0` = every event validated and broker-confirmed. `1` = something was rejected, failed or left unconfirmed. `2` = configuration, data-source, broker or topic problem before publishing.
-
-**Run the tests**
-
-```bash
-uv run pytest                    # unit tests: no Kafka needed (integration tests are excluded by default)
-uv run pytest -m integration     # real-broker round trip; requires `docker compose up -d kafka`
-```
-
----
-
-## G. Example event
-
-This is the **actual first event** of `uv run python -m data_engineering.streaming.producer simulate --dry-run` (default config):
-
-```json
-{
-  "schema_version": "1.0",
-  "event_id": "sim-c9944cc35156:SIM-NA-001:0",
-  "event_timestamp": "2026-01-01T00:00:00Z",
-  "timestamp_source": "simulated",
-  "asset_id": "SIM-NA-001",
-  "data_center_id": "dc-na-sim-001",
-  "region": "North America",
-  "region_code": "NA",
-  "source_type": "simulated",
-  "simulation_run_id": "sim-c9944cc35156",
-  "slot_index": 0,
-  "reading_status": "observed",
-  "metrics": {
-    "workload_intensity": 0.337,
-    "cpu_utilization": 28.198,
-    "gpu_utilization": 0.0,
-    "memory_utilization": 47.442,
-    "storage_utilization": 21.788,
-    "disk_io_iops": 4370.31,
-    "network_throughput_gbps": 15.229,
-    "network_latency_ms": 36.983,
-    "ambient_temperature_c": 19.223,
-    "humidity_percentage": 47.112,
-    "inlet_temperature_c": 20.573,
-    "exhaust_temperature_c": 23.088,
-    "fan_speed_rpm": 2488.522,
-    "airflow_cfm": 151.341,
-    "power_consumption_kw": 94.748,
-    "pue": 1.05
-  },
-  "asset_attributes": {
-    "server_type": "Compute",
-    "cooling_type": "Air",
-    "server_age_years": 2,
-    "rack_u_position": 36,
-    "energy_source_primary": "Grid"
-  },
-  "labels": {
-    "source_failure_risk_level": "Low",
-    "source_energy_efficiency_class": "Medium",
-    "source_maintenance_status": "Recent",
-    "injected_anomalies": []
-  },
-  "provenance": {
-    "dataset": "deeplumiere/hyperscale-data-center-dataset",
-    "source_file": "green_ai_datacenter.csv",
-    "source_sha256": "6d963fa43926e355e82ee6b167dabda4944b14cdcaf3b46c89676cda9ca0e8f5",
-    "baseline_source_row_number": 66805,
-    "generator": "dco-baseline-telemetry",
-    "generator_version": "1.0.0",
-    "seed": 42,
-    "published_from": "simulator",
-    "field_sources": {
-      "metrics": "simulated",
-      "event_timestamp": "simulated",
-      "asset_id": "simulated",
-      "data_center_id": "simulated",
-      "region_code": "source_dataset",
-      "region": "transformed",
-      "asset_attributes": "source_dataset",
-      "source_labels": "source_dataset",
-      "injected_anomalies": "simulated"
-    }
-  }
-}
-```
-
-Field by field. **S** = copied from the source dataset, **T** = transformed from source values, **G** = generated (simulated) or a project constant.
-
-| Field | Type | Origin | Meaning |
-|---|---|---|---|
-| `schema_version` | string `"1.0"` | G | Event format version. A breaking change means `"2.0"` and a new schema file |
-| `event_id` | string | G | `<simulation_run_id>:<asset_id>:<slot_index>`. **Deterministic**: republishing the same run produces the same IDs, so consumers can deduplicate |
-| `event_timestamp` | string, UTC `YYYY-MM-DDTHH:MM:SSZ` | G | Simulated measurement time = start + `slot_index` × interval. **Not** the publish time |
-| `timestamp_source` | `"simulated"` | G | States explicitly that the timestamp is not from the dataset (which has none) |
-| `asset_id` | string | G | Synthetic, stable within a run: `SIM-NA-001` … `SIM-NA-<N>` |
-| `data_center_id` | string | G | The one hypothetical data center (`config/simulation.yaml` → `streaming.data_center_id`) |
-| `region_code` | string | S | `datacenter_region` of the baseline rows |
-| `region` | string | T | `NA` → "North America". Inferred mapping; the dataset doesn't define its codes |
-| `source_type` | `"simulated"` | G | Only value in v1.0. Source rows are never published as telemetry (no timestamps, no asset IDs) |
-| `simulation_run_id` | string | G | Hash of the simulation config + source checksum. Same config gives the same ID |
-| `slot_index` | integer ≥ 0 | G | Slot number from the start |
-| `reading_status` | `"observed"` \| `"missing"` | G | `missing` = the slot exists but produced no reading; then **every metric is `null`** |
-| `metrics.*` | number, or `null` only when missing | G | 16 simulated measurements. Units are inferred from column names (see the schema `description`s): `_c` °C, `_kw` kW, `_ms` ms, `_gbps` Gbit/s, `_rpm`, `_cfm`, `_iops`; utilizations are % (inferred from their 0–100 source range); `workload_intensity` and `pue` are unitless |
-| `asset_attributes.*` | string / integer | S | Static attributes of the asset's baseline source row |
-| `labels.source_*` | string | S | Labels of the baseline source row (`failure_risk_level`, `energy_efficiency_class`, `maintenance_status`). **Static per asset**, not re-evaluated each minute |
-| `labels.injected_anomalies` | array | G | Ground truth for anomalies the simulator deliberately injected at this slot, e.g. `[{"anomaly_id": "sim-c9944cc35156-A004", "anomaly_type": "power_spike", "affected_metrics": ["power_consumption_kw"]}]` (actual event `sim-c9944cc35156:SIM-NA-006:101`). Empty otherwise |
-| `provenance.*` | object | G/S | Dataset, file checksum and source row behind the asset, generator + seed, and how it was published. `field_sources` repeats the S/T/G column above inside every message |
-
-A **missing** reading looks like this (actual event `sim-c9944cc35156:SIM-NA-004:5`, `2026-01-01T00:05:00Z`): `"reading_status": "missing"`, `"metrics": {"workload_intensity": null, "cpu_utilization": null, …}`, `"injected_anomalies": []`.
-
-**Kafka record around the payload:** key = `asset_id` (UTF-8). Headers: `schema_version`, `source_type`, `content-type: application/json`. The record timestamp is the broker-side *CreateTime* (publish time) on purpose; see J.
-
-**Validation.** Every event is checked with `jsonschema` (Draft 2020-12) against `src/data_engineering/streaming/telemetry_event.v1.schema.json` before it is sent:
-
-- no unknown fields, and exactly the 16 metrics
-- the timestamp pattern
-- observed slots must have **all** metrics as numbers
-- missing slots must have **all** metrics `null` and no anomalies
-- `field_sources` must match exactly
-
-Serialization uses `allow_nan=False`, so `NaN` can never leave as invalid JSON. Failing events are counted as `rejected`, logged with the reasons, and never sent.
-
----
-
-## H. Observing messages
-
-The image ships Kafka's CLI tools under `/opt/kafka/bin`. Git Bash users: `export MSYS_NO_PATHCONV=1` first.
-
-**Are messages arriving? How many per partition?**
-
-```bash
-docker compose exec kafka /opt/kafka/bin/kafka-get-offsets.sh --bootstrap-server localhost:9092 --topic datacenter.telemetry
-# datacenter.telemetry:0:8640
-# datacenter.telemetry:1:10080
-# datacenter.telemetry:2:10080        <- after one 24 h run: 8,640 + 10,080 + 10,080 = 28,800
-```
-
-The numbers are the *next* offset per partition, so their sum is the total number of messages ever written (within retention).
-
-**Read messages with key, partition, offset and record timestamp**
-
-```bash
-docker compose exec kafka /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 \
-  --topic datacenter.telemetry --from-beginning --max-messages 3 \
-  --property print.key=true --property print.partition=true --property print.offset=true --property print.timestamp=true
-# CreateTime:1791874301330  Partition:1  Offset:0  SIM-NA-003  {"schema_version":"1.0","event_id":"sim-c9944cc35156:SIM-NA-003:0","event_timestamp":"2026-01-01T00:00:00Z",...
-```
-
-Notice the two different times: `CreateTime` is when it was published (October 2026), and `event_timestamp` is the simulated measurement time (2026-01-01).
-
-**Check keys, timestamp order, counts and duplicates in one go**
-
-```bash
-docker compose exec -T kafka /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 \
-  --topic datacenter.telemetry --from-beginning --timeout-ms 10000 --property print.key=true \
-  | uv run python -m data_engineering.streaming.inspect_stream
-```
-
-`inspect_stream` is a text filter over the console consumer's output, not a Kafka consumer. It prints:
-
-- `messages` and `messages_per_key` (expect 1,440 per asset for one 24 h run)
-- `runs`
-- `reading_status` counts
-- `event_timestamp_range`
-- `key_not_equal_asset_id` (expect 0)
-- `schema_invalid` (expect 0)
-- `timestamps_not_increasing_per_key` (expect `{}` for a single run)
-- `duplicate_event_ids` (expect 0 for a single run)
-
-After publishing the same run twice, you will see `duplicate_event_ids: 28800` and non-increasing timestamps per key. That's correct: it's the same events published again (see I, "Duplicates").
-
-**Expected counts:** see J. `kafka-console-consumer.sh` registers a temporary consumer group (`console-consumer-NNNN`); `kafka-consumer-groups.sh --bootstrap-server localhost:9092 --list` shows them.
-
----
-
-## I. Reliability and troubleshooting
-
-**Delivery semantics (configured explicitly in `settings.py`)**
-
-- `acks=all`: the broker confirms only after all in-sync replicas have the write (one replica locally).
-- `enable.idempotence=true`: the broker discards duplicates created by the client's *own* internal retries and keeps per-partition order. This does **not** deduplicate a second run of the producer.
-- Retries are librdkafka's: transient errors are retried automatically, with `retry.backoff.ms=100`, until `delivery.timeout.ms=120000`. After that the delivery callback reports the failure. The producer then counts it as `failed`, does **not** re-send it (that could reorder or duplicate), and exits with 1. Rerunning the same command republishes with the same `event_id`s.
-- Counters: `attempted` (read from source) → `rejected` (schema/serialization) or `queued` (in the client buffer) → `delivered` (broker-confirmed) / `failed` (error callback or `produce()` error) / `undelivered` (still unconfirmed when the final `flush()` gave up after `KAFKA_FLUSH_TIMEOUT_S`). **Queued is not delivered.**
-- End to end this is **at-least-once**, not exactly-once. Consumers must be idempotent: deduplicate or UPSERT on `event_id`.
+### Troubleshooting setup
 
 | Symptom | Cause / fix |
 |---|---|
-| `cannot reach Kafka at 127.0.0.1:9092 within 10.0s (... _TRANSPORT ... / _TIMED_OUT ...)`, exit 2 | Broker not running (`docker compose ps`; start with `docker compose up -d --wait kafka`), Docker Desktop not started, or a wrong `KAFKA_BOOTSTRAP_SERVERS` / `--bootstrap-servers` (wrong port gives `_TRANSPORT` quickly) |
-| Intermittent multi-second connects or metadata timeouts with `localhost:9092` | **Measured on this machine:** `localhost` resolves to IPv6 `::1` first, nothing listens there, and each attempt took ~2 s to fail. Sometimes several in a row exceeded the 10 s metadata timeout. Fix (already applied): the broker *advertises* `127.0.0.1:9092`, and the default bootstrap is `127.0.0.1:9092`. Use `127.0.0.1`, not `localhost`, from your machine |
-| Docker networking / advertised listeners | A client first contacts the bootstrap address, then reconnects to whatever address the broker **advertises**. Host programs use `PLAINTEXT_HOST` → `127.0.0.1:9092`. Other containers on the compose network must use `kafka:19092` (`PLAINTEXT` listener). Advertising an address the client can't reach causes connect loops even though the bootstrap worked |
-| `topic 'datacenter.telemetry' is not available (... UNKNOWN_TOPIC_OR_PART ...)`, exit 2 | Topic not created (auto-creation is off), or deleted by `docker compose down`. Run `uv run python -m data_engineering.streaming.topic_setup` |
-| `event rejected by schema validation` with `problems` | The event breaks the contract (e.g. an observed slot with a `null` metric, an unknown metric, a bad timestamp format). Counted as `rejected`, never sent, exit 1. Fix the source/mapping, not the schema, unless the contract really changed (then bump `schema_version`) |
-| Serialization error `serialization: Out of range float values are not JSON compliant` | A `NaN`/`Infinity` reached serialization. `build_event` maps NaN to `null` first, so from the built-in sources this surfaces as a schema rejection instead |
-| Queue saturation (`queue_full_waits` > 0 in the summary) | Producing faster than the broker accepts. `produce()` raised `BufferError`; the producer served callbacks and retried, so nothing was dropped. Raise `KAFKA_QUEUE_MAX_MESSAGES`, or throttle with `--rate` / `--speedup` |
-| `delivery failed ... _MSG_TIMED_OUT` / `undelivered > 0` | The broker was unreachable for longer than `KAFKA_DELIVERY_TIMEOUT_MS` (or the flush timeout). Exit 1. Check the broker, then rerun |
-| Duplicate events | Running the same command twice publishes the same events twice (same `event_id`), which `inspect_stream` shows as `duplicate_event_ids`. Kafka does not deduplicate across runs. The future consumer must. Use a different `--seed`/config to get a different `simulation_run_id` |
-| Graceful shutdown | Ctrl+C (SIGINT), SIGTERM, or Ctrl+Break (Windows SIGBREAK) sets a stop flag. The producer stops reading, `flush()`es outstanding messages (up to `KAFKA_FLUSH_TIMEOUT_S`) and prints the summary. **Verified:** a continuous run stopped with Ctrl+Break reported `attempted=28 delivered=28` and exited 0 |
-| `could not import 'pandas'` (test skipped) | pandas is not a project dependency. The pandas-NA normalization is covered by a duck-typed test; the real-pandas part runs only if pandas is installed |
-| `window too short for all configured anomalies; placed fewer` | Very short `--duration-minutes`: anomalies are placed per window without overlapping, and fewer fit. Informational |
+| `cannot reach Kafka at 127.0.0.1:9092` (exit 2) | Docker not running or broker unhealthy: `docker compose up -d --wait kafka` |
+| `topic ... not found` | Run `topic_setup` (auto-creation is disabled on purpose) |
+| API `503 store_not_initialized` | Run `db/init_telemetry_store.py` (the schema must be version 2) |
+| API `404 unknown_run` | The store has no telemetry yet: run step 6 |
+| `503 model_not_trained` / `status: UNAVAILABLE, MODEL_NOT_TRAINED` | Run step 7 |
+| `MODEL_ARTIFACT_INVALID` | Artifact missing files, or trained with a different XGBoost major version: retrain |
+| Recommendations take 10–60 s | LLM mode; set `AGENTS_LLM_ENABLED=false` for deterministic runs |
+| Git Bash rewrites `/opt/kafka/bin/...` | Prefix `docker compose exec` commands with `MSYS_NO_PATHCONV=1` |
+
+More: [PIPELINE_GUIDE §I and §II.14](docs/PIPELINE_GUIDE.md#ii14-troubleshooting).
 
 ---
 
-## J. Data correctness and provenance
+## 9. Configuration reference
 
-**Three kinds of data**
+All variables can be set in the environment or in `.env`. Defaults below are the real defaults in code.
 
-| Kind | Where | Example |
+### API (`src/app/config.py`, prefix `API_`)
+
+| Variable | Purpose | Default | Example | Sensitive |
+|---|---|---|---|---|
+| `API_ENVIRONMENT` | `development` / `test` / `production` (logged; no behaviour switch) | `development` | `production` | no |
+| `API_DOCS_ENABLED` | Serve `/docs`, `/redoc`, `/openapi.json` | `true` | `false` | no |
+| `API_DB_CONNECT_TIMEOUT_S` | PostgreSQL connect timeout per request (1–60) | `3` | `5` | no |
+| `API_THREADPOOL_TOKENS` | Concurrent sync handlers (1–1000) | `40` | `80` | no |
+| `API_CORS_ORIGINS` | JSON list of allowed origins; empty disables CORS. **Allows GET only** | `[]` | `["http://localhost:5173"]` | no |
+| `API_MODEL_TRAINING_ENABLED` | Enable `POST /cooling-model/train` | `false` | `true` | no |
+| `API_AUTH_TOKEN` | If set, every `/api/v1` route except `/health` needs `Authorization: Bearer <token>` | unset | `<random 32+ chars>` | **yes** |
+| `API_ALLOWED_ASSETS` | Operator asset scope (JSON list); empty means all | `[]` | `["SIM-NA-001"]` | no |
+| `API_QUERY_TIMEOUT_S` | Per-statement timeout for API reads (SQLite progress handler; PostgreSQL `statement_timeout`) | `10.0` | `5` | no |
+| `API_MAX_TELEMETRY_RANGE_HOURS` | Widest time range per request (1–168) | `24` | `6` | no |
+| `API_MAX_TELEMETRY_POINTS` | Points per response (10–50,000) | `5000` | `2000` | no |
+| `API_DASHBOARD_TREND_MINUTES` | Default overview trend window; also the copilot's default window | `60` | `120` | no |
+| `API_DASHBOARD_TREND_INTERVAL_MINUTES` | Trend bucket size | `5` | `15` | no |
+| `API_MODEL_MAX_AGE_DAYS` | Artifacts older than this → predictions `UNAVAILABLE` (`MODEL_STALE`) | unset (not checked) | `30` | no |
+| `API_TWIN_POLL_INTERVAL_S` | SSE shared poll interval | `10.0` | `5` | no |
+| `API_TWIN_HEARTBEAT_S` | SSE heartbeat interval | `15.0` | `15` | no |
+| `API_TWIN_MAX_SUBSCRIBERS` | SSE subscribers per process | `50` | `200` | no |
+| `API_COPILOT_MAX_CONVERSATIONS` / `_MAX_TURNS` / `_CONVERSATION_TTL_S` | Bounded in-process copilot memory | `200` / `10` / `3600` | — | no |
+
+### LLM provider (`src/data_engineering/recommendations/config.py: LLMSettings`, no prefix)
+
+| Variable | Purpose | Default | Sensitive |
+|---|---|---|---|
+| `FIREWORKS_API_KEY` | Enables LLM mode. Server-side only; never logged or returned (`/agents/status` reports only whether it is set) | unset → deterministic | **yes** |
+| `FIREWORKS_BASE_URL` | OpenAI-compatible base URL (the adapter strips a trailing `/v1` for ChatFireworks) | `https://api.fireworks.ai/inference/v1` | no |
+| `FIREWORKS_MAIN_MODEL` | Planner, explainer, copilot planner/answer | `accounts/fireworks/models/glm-5p3-flash` | no |
+| `FIREWORKS_SUBAGENT_MODEL` | Specialist agents | `accounts/fireworks/models/deepseek-v4p1-flash` | no |
+| `FIREWORKS_TIMEOUT_S` | Per-call timeout (0–300) | `60.0` | no |
+| `FIREWORKS_MAX_RETRIES` | Transport retries per call (0–5) | `1` | no |
+| `FIREWORKS_MAX_TOKENS` | Output budget (256–32,768); both models reason before answering | `8192` | no |
+| `FIREWORKS_REASONING_EFFORT` | `low` / `medium` / `high` | `low` | no |
+| `AGENTS_LLM_ENABLED` | `false` forces deterministic workflows even with a key | `true` | no |
+
+### Telemetry store, Kafka, Parquet (`src/data_engineering/streaming/settings.py`)
+
+Shared by the consumer and the API, so both always point at the same store.
+
+| Variable | Purpose | Default | Sensitive |
+|---|---|---|---|
+| `TELEMETRY_DB_BACKEND` | `sqlite` or `postgres` | `sqlite` | no |
+| `TELEMETRY_SQLITE_PATH` | SQLite file | `data/telemetry_store.db` | no |
+| `TELEMETRY_POSTGRES_URL` | PostgreSQL URL (logged with the password redacted) | unset | **yes** (contains the password) |
+| `POSTGRES_USER` / `POSTGRES_DB` / `POSTGRES_PASSWORD` | Compose PostgreSQL container (no default password; it refuses to start without one) | `dco` / `dco` / — | password: **yes** |
+| `TELEMETRY_TEST_POSTGRES_URL` | Enables `-m postgres` tests | unset | **yes** |
+| `KAFKA_BOOTSTRAP_SERVERS`, `KAFKA_TOPIC`, `KAFKA_DLQ_TOPIC`, `KAFKA_GROUP_ID` | Broker and topics | `127.0.0.1:9092`, `datacenter.telemetry`, `datacenter.telemetry.dlq`, `dco-telemetry-sink` | no |
+| `KAFKA_*` producer/consumer tuning, `CONSUMER_*`, `PARQUET_*`, `PRODUCER_*` | Delivery semantics, batching, retries, export thresholds | see `.env.example` (every one is listed with its default) | no |
+| `LOG_LEVEL` | `DEBUG` / `INFO` / `WARNING` / `ERROR` | `INFO` | no |
+
+### Configuration files and their overrides
+
+| Variable | File | Consumed by |
 |---|---|---|
-| **Source** | Kaggle files (`data/raw/`), `source_records` in SQLite | `failure_risk_level = "Low"` of row 66,805 |
-| **Transformed** | Derived from source values by a documented rule | `region = "North America"` from `region_code = "NA"`; fitted slopes (CPU per unit workload) used by the simulator |
-| **Synthetic** | Generated by this project | every metric value, `event_timestamp`, `asset_id`, missing slots, injected anomalies |
+| `COOLING_STATE_CONFIG` | `config/cooling_state.yaml` | Estimator; an invalid file **stops API startup** |
+| `COOLING_MODEL_CONFIG` | `config/cooling_model.yaml` | Training, predictor, optimizer |
+| `RECOMMENDATIONS_CONFIG` | `config/recommendations.yaml` | Recommendation workflow |
+| `DIGITAL_TWIN_LAYOUT` | `config/digital_twin_layout.yaml` | Twin; reloaded when the file's mtime changes |
+| `DATACENTER_OPS_DB_PATH` | `data/datacenter_ops.db` | Phase 1 and the producer's baseline rows |
+| `KAGGLE_API_TOKEN` | — | Kaggle CLI, only if anonymous download is refused (**sensitive**) |
 
-The source itself is self-described synthetic data, so even "source" fields are not observations of a real facility. Never present this stream as real operational telemetry, and never present simulated anomalies as real incidents. The `source_type`, `timestamp_source` and `provenance.field_sources` fields exist so downstream code (and AI agents) can't mistake one for the other.
+### Hardcoded values worth knowing
 
-**Missing measurements must not become zero.** `0 kW` or `0 %` CPU is a plausible, *wrong* reading. A detector would flag a fake outage, and averages would be dragged down. A missing slot is an explicit event with `reading_status: "missing"` and `null` metrics, so consumers can count gaps (1 % by default: 311 of 28,800 in the default run) and choose a policy.
-
-**How timestamps are assigned.** The dataset has no timestamps, and its `time_of_day` column is only a three-value bucket. Slots are generated on a regular grid: `event_timestamp = start + slot_index × interval`, in UTC.
-
-- The interval is **half-open**: `[start, start + duration)`. 24 h at 60 s gives slots `00:00` … `23:59`, which is 1,440 slots per asset. `24:00` is the first slot of the next window.
-- `--speedup` and `--rate` change only *when* events are sent, never their timestamps.
-- The Kafka record timestamp is left as publish time (CreateTime) on purpose. Kafka's time-based retention uses record timestamps, so stamping records with simulated January dates would make the broker delete them almost immediately.
-
-**Seeds and reproducibility.** Each random component draws from its own stream derived from the seed:
-
-- asset selection
-- per-asset workload regime
-- per-metric noise
-- missingness
-- anomaly placement per window
-
-So the same seed and config always produce identical events and IDs (tested), and changing `missing_rate` doesn't change the underlying signal. The run ID is a hash of the config + source checksum. The default `simulate` run reproduces Phase 1's stored run `sim-c9944cc35156` exactly.
-
-**Expected event counts.**
-
-```
-slots_per_asset = duration_minutes × 60 / interval_seconds        (1440 × 60 / 60 = 1,440)
-events          = assets × slots_per_asset                        (20 × 1,440 = 28,800)
-events          = min(events, --max-events)                       if --max-events is set
-observed ≈ events × (1 − missing_rate); missing ≈ events × missing_rate   (missing slots are still events)
-```
-
-Continuous mode has no fixed total. It produces `assets` events per simulated interval until stopped.
-
----
-
-## K. Future integration
-
-The consumer, database persistence, Parquet history and DuckDB analytics described here as "next" are now **implemented**; see [Part II](#part-ii-consumer-storage-and-analytics).
-
-Still **not implemented**:
-
-1. **More FastAPI endpoints.** The `app` package (`src/app/`, Part III.0) serves `/api/v1/health` and `/api/v1/telemetry/cooling-state`. New read-only endpoints go into the `telemetry` domain or new domain packages:
-   - assets
-   - per-asset readings in a time window: `readings_between`, backed by the `(asset_id, event_timestamp)` index
-   - `anomaly_records`
-   - ingestion health: `ingestion_batches`, consumer lag
-
-   Plus analytical endpoints over `TelemetryAnalytics` (DuckDB on Parquet). The API never reads Kafka directly for request/response queries.
-2. **Frontend and diagnostic agents** call the API. Agents must cite `event_id`s, filter by `simulation_run_id`, and respect `source_type` / `field_sources` (everything is simulated) when making claims.
-3. An anomaly **detector**. Today `anomaly_records` holds only the simulator's injected labels, which is ground truth for evaluating a future detector.
-
----
-
-## L. Limitations and next steps
-
-**Limitations**
-
-- **All telemetry is synthetic.**
-  - Relationships come from an engineered dataset, and units are inferred from column names.
-  - The diurnal workload shape is an assumption.
-  - Asset labels are static per asset, not time-varying risk assessments.
-  - Simulated asset IDs repeat across runs; filter by `simulation_run_id`.
-- **Single broker, replication factor 1, no TLS/auth: local development only.** `docker compose down` deletes topic data. No Schema Registry: the JSON Schema file is the contract.
-- **Delivery is at-least-once with idempotent storage, not exactly-once.** DLQ records can repeat after restarts or with several consumer groups.
-- **Consumer scale.** Tested with one consumer process per group:
-  - SQLite allows one writer, so run a single instance.
-  - With PostgreSQL, several instances should work for the database writes, but concurrent Parquet exporters were not tested.
-- **One poison message blocks its partition while the DLQ is unavailable.** That's correctness over availability (II.3).
-- **Retry timing.** Worst-case retry time includes the PostgreSQL connect timeout (10 s per reconnect attempt); keep it under `KAFKA_MAX_POLL_INTERVAL_MS`.
-- **Storage limits.**
-  - No retention or pruning of `telemetry_readings` yet; it grows with the stream.
-  - Schema migrations are a version table plus idempotent DDL, not a migration framework.
-  - Parquet history lags the database by up to `PARQUET_FLUSH_ROWS` / `PARQUET_FLUSH_INTERVAL_S`.
-- **Lag reporting.** Consumer lag comes from the client's cached watermarks; it's `null` when unknown.
-- **Tested on:** Windows 11 (Git Bash + PowerShell 5.1), Docker Desktop, Kafka 3.9.1, PostgreSQL 16 (Docker), SQLite 3.45. Linux/macOS were not run.
-
-**Suggested development sequence**
-
-1. FastAPI read endpoints over the telemetry store and DuckDB analytics (K.1).
-2. A simple anomaly-detection consumer group (rolling robust z-score per asset and metric), evaluated against `anomaly_records`.
-3. Retention for `telemetry_readings`: delete rows that are both older than N days and exported (`export_id` is set).
-4. Dashboard, then AI-agent investigation over stored evidence.
-
----
-
-# Part II: Consumer, storage and analytics
-
-Part I (sections A–L) built the producer. Part II is the other side of the topic: the **Kafka consumer** that validates every event, stores it in a database (SQLite by default, PostgreSQL optional), keeps an analytical history in **Parquet**, and answers historical questions with **DuckDB**. FastAPI, the dashboard and agents are still **not implemented**.
-
-## II.1 End-to-end architecture
-
-```mermaid
-flowchart LR
-    subgraph implemented["Implemented"]
-        PR[Kafka producer] --> T[["datacenter.telemetry<br/>3 partitions"]]
-        T --> C["Consumer, group dco-telemetry-sink<br/>validate → batch"]
-        C -->|"① one transaction per batch<br/>(idempotent on event_id)"| DB[("Telemetry store<br/>SQLite data/telemetry_store.db<br/>or PostgreSQL")]
-        C -->|"② invalid messages"| DLQ[["datacenter.telemetry.dlq"]]
-        C -.->|"③ commit offsets<br/>after ① and ②"| T
-        DB -->|"④ export ledger<br/>(redoable)"| PQ[("Parquet history<br/>data/telemetry/region_code=…/event_date=…")]
-        PQ --> DD[DuckDB analytics<br/>query_telemetry CLI]
-    end
-    subgraph planned["Planned: NOT implemented"]
-        DB -.-> API[FastAPI]
-        DD -.-> API
-        API -.-> UI[Frontend]
-        API -.-> AG[Diagnostic agents]
-    end
-```
-
-| Component | Responsibility in this project | Not its job |
+| Value | Where | Implication |
 |---|---|---|
-| **Producer** (Part I) | Turn simulated slots into validated events, key them by `asset_id`, get broker confirmation | Storage, deduplication |
-| **Topic** `datacenter.telemetry` | Durable, ordered-per-partition buffer between producer and consumers; replayable for 7 days | Queries, deduplication, long-term history |
-| **Consumer** (`streaming/consumer.py`) | Validate, transform, write batches, dead-letter bad messages, commit offsets only after the work is durable | Analytics |
-| **Telemetry store** (SQLite/PostgreSQL) | Operational source of truth: asset inventory, queryable telemetry, explicit anomaly labels, batch metadata, Parquet export ledger | Large historical scans |
-| **DLQ topic** `datacenter.telemetry.dlq` | Keep every unprocessable message with its reason and original bytes, so nothing is silently dropped | Retrying (bad messages are permanently bad) |
-| **Parquet** (`storage/parquet_sink.py`) | Compressed, columnar, append-only history, partitioned by region and day | Transactions, updates, deduplication |
-| **DuckDB** (`analytics/duckdb_queries.py`) | SQL over the Parquet files in place: aggregates, buckets, completeness | Being a database of record |
+| ID pattern `^[A-Za-z0-9._:-]{1,64}$` | `app/telemetry/constants.py` | Asset/run IDs outside it are rejected with 422 |
+| CORS `allow_methods=["GET"]` | `app/middleware.py` | A browser frontend cannot call the POST routes until this changes |
+| SSE queue 100 events, replay buffer 500 | `TwinBroadcaster.__init__` | Slow clients receive `resync_required` |
+| Copilot question ≤ 2,000 chars; LLM evidence ≤ 120 items | `copilot/graph.py` | Bounds prompt size |
+| Graph recursion limits 40 / 30 | `RecommendationEngine.analyze`, `CopilotEngine.chat` | Bounds loops |
+| Explanation re-asks: 2 attempts; LLM parse retries: 1 | `graph.py`, `llm.py` | Bounds LLM calls per analysis |
+| Training feature sensitivity probe ±100 rpm | `training.py` | Reported association only, never used for decisions |
+| SQLite `busy_timeout` 5 s, WAL, `synchronous=FULL` | `sqlite_store.py` | Writers wait up to 5 s for the lock |
 
-**Why Kafka is not the database.** Kafka keeps messages only for the retention period (7 days here). It can't answer "SIM-NA-004 between 10:00 and 11:00" without reading every message, and it has no notion of uniqueness: the same event published twice is two messages (we published one run twice on purpose, see II.6). The consumer turns the stream into **stored state that can be queried and deduplicated**.
+---
 
-## II.2 What validation, transformation and batch writes mean here
+## 10. API reference (summary)
 
-**Validation** (`streaming/event_validation.py`) runs on every message *before* anything is written. It reuses the producer's own contract, `telemetry_event.v1.schema.json`, so producer and consumer cannot drift apart. On top of that, it checks things only a consumer can see:
+Base URL `http://127.0.0.1:8000/api/v1`. All responses are JSON (SSE for `/digital-twin/stream`). The full
+reference with request/response examples, validation rules and error codes is in
+[docs/API.md](docs/API.md). The pre-v1 prefix `/api/...` still serves the same handlers as deprecated
+aliases hidden from OpenAPI.
 
-| Reason code (DLQ `failure_reason`) | Example |
-|---|---|
-| `malformed_json` | empty value, not UTF-8, `{not json`, `NaN` literals |
-| `not_json_object` | `[1, 2, 3]` |
-| `unsupported_schema_version` | `"schema_version": "9.9"` (this consumer understands `1.0`) |
-| `schema_violation` | missing `asset_id`, unknown top-level field, empty identifier |
-| `invalid_timestamp` | `2026-01-01 00:00:00` (wrong format), `2026-02-30T00:00:00Z` (no such day) |
-| `invalid_metric_value` | `"12.5"` (string), `true`, `1e400` (overflows to infinity), `null` on an *observed* reading, unknown metric |
-| `invalid_identifier` | `event_id` not equal to `<simulation_run_id>:<asset_id>:<slot_index>`; deduplication depends on this |
+**Auth:** none unless `API_AUTH_TOKEN` is set; then every route except `/health` needs
+`Authorization: Bearer <token>` (401 `unauthorized`). `API_ALLOWED_ASSETS` returns 403
+`asset_not_authorized` for out-of-scope assets and hides them from lists.
 
-Missing readings (`reading_status: "missing"`, all metrics `null`) are **valid** and stored as SQL `NULL` and Parquet null, never 0. A message whose Kafka key differs from its `asset_id` is stored but counted (`key_mismatches`) and logged, because per-asset ordering is no longer guaranteed for it.
-
-**Transformation** (`storage/base.py: prepare_event`) maps one event onto table rows:
-
-| Event field | Stored as |
-|---|---|
-| `event_id`, `simulation_run_id`, `asset_id`, `slot_index`, `reading_status`, `schema_version`, `source_type`, `timestamp_source` | same-named columns of `telemetry_readings` |
-| `event_timestamp` | `event_timestamp` (normalized UTC instant) **and** `event_timestamp_raw` (the exact received string, for traceability) |
-| `metrics.*` (16) | 16 typed numeric columns (`NULL` when missing) |
-| `asset_attributes.*`, `labels.source_*`, `provenance.*` | `assets` row (static per asset and run); `provenance.published_from` stays on the reading |
-| `labels.injected_anomalies[]` | one `anomaly_records` row per anomaly per event |
-| Kafka topic / partition / offset | `kafka_topic`, `kafka_partition`, `kafka_offset` on the reading |
-
-**Batch writes.** The consumer collects up to `CONSUMER_BATCH_MAX_MESSAGES` (1,000) messages or waits at most `CONSUMER_BATCH_MAX_WAIT_S` (2 s), whichever comes first. It then writes all valid events of that batch in **one transaction**: either every row of the batch exists afterwards, or none does. One commit per batch instead of per event is what makes this fast. Measured on this laptop with SQLite: 57,666 messages in 58 batches, about 32 s of processing.
-
-## II.3 Consumer groups, partitions, offsets, commits, retries, dead letters
-
-- **Consumer group.** `KAFKA_GROUP_ID` (default `dco-telemetry-sink`) names the consumer. Kafka stores *per group* how far it has read. A second group (we used `dco-telemetry-sink-pg` for PostgreSQL) reads the same topic independently from its own position.
-- **Partitions.** The topic has 3 partitions. Within a group, each partition is read by exactly one consumer process, so up to 3 processes could share the work. One process is the tested setup (see limitations). Because the producer keys by `asset_id`, all of one asset's events are in one partition, in order.
-- **Offsets and commits.** Committing offset *N* for a partition means "everything before *N* is done; resume at *N*". Auto-commit is **disabled** (`enable.auto.commit=false`, `enable.auto.offset.store=false`). The consumer commits synchronously, and only:
-  1. after the batch's database transaction has committed, and
-  2. after every invalid message of the batch has been confirmed by the broker on the DLQ.
-- **Never past a gap.** `OffsetTracker` records, per partition, which offsets are handled. It commits only up to the end of the *contiguous* handled run. If offset 5 could not be dead-lettered, offsets 6, 7, … of that partition are not committed either, even though they were stored (`test_dlq_failure_blocks_commits_past_the_invalid_message`).
-- **Retries** use bounded exponential backoff with jitter: delay = `cap/2 + random × cap/2`, with `cap = min(CONSUMER_RETRY_BACKOFF_MAX_S, CONSUMER_RETRY_BACKOFF_INITIAL_S × 2^attempt)`. That gives 0.375 s, 0.75 s, 1.5 s, … up to `CONSUMER_MAX_RETRIES` attempts.
-
-| Failure | Retried? | If it keeps failing |
-|---|---|---|
-| Transient DB error (SQLite `database is locked` / `disk I/O error`; PostgreSQL connection loss, SQLSTATE 08/40/53/57P) | yes, reconnecting between attempts | consumer stops, exit 1, **nothing committed**; the batch is redelivered after restart |
-| Permanent DB error (constraint violation, bug) | no | same: stop, exit 1, nothing committed |
-| Invalid message | no (it will never become valid) | sent to the DLQ |
-| DLQ not confirming | yes | commit the safe prefix, stop, exit 1 |
-| Offset commit error | yes if retriable; not for rebalances (`ILLEGAL_GENERATION`, …) | logged; events are redelivered and deduplicated; the next successful commit covers them |
-| Parquet export error | on the next loop, after a 5 s backoff | stays in the ledger; reported at shutdown with exit 1 |
-
-The settings loader refuses `CONSUMER_MAX_RETRIES × CONSUMER_RETRY_BACKOFF_MAX_S` close to `KAFKA_MAX_POLL_INTERVAL_MS`. If one batch's retries took longer than that, Kafka would evict the consumer from the group mid-retry.
-
-- **Rebalances.** A batch is fully processed and committed before the next poll, so normally nothing is in flight when partitions move. `on_revoke` drops tracking for revoked partitions. Anything uncommitted is redelivered to the new owner and deduplicated.
-- **Dead letters.** Each DLQ record is JSON around the untouched original. This is a real record from the demo, payload shortened:
-
+**Errors:** every non-2xx response has the same shape, and the submitted input is never echoed:
 ```json
-{"dlq_schema_version": "1.0", "failure_reason": "malformed_json",
- "failure_details": ["Expecting ',' delimiter: line 1 column 47 (char 46)"],
- "failed_at": "2026-10-13T07:41:59.361491Z", "consumer_group": "dco-telemetry-sink",
- "source_topic": "datacenter.telemetry", "source_partition": 1, "source_offset": 20160,
- "source_timestamp_ms": 1791877316724, "source_key": "SIM-NA-003",
- "original_payload_utf8": "{\"schema_version\": \"1.0\", \"event_id\": \"broken\"", "original_payload_base64": null}
-```
-
-Headers repeat the reason and the source coordinates. Non-UTF-8 payloads are kept in `original_payload_base64`. **DLQ unavailable:** dropping the message or committing past it would lose it silently, so the consumer commits only the safe prefix and stops (exit 1). The trade-off is that one poison message plus a DLQ outage halts consumption of that partition until the DLQ is back. That's a deliberate choice of *correctness over availability*.
-
-## II.4 At-least-once delivery and idempotent writes
-
-Kafka offsets and the database cannot be committed in one atomic operation, so there is always a window where one has happened and the other hasn't. The design makes that window harmless:
-
-| What happens | Result | Why it is safe |
-|---|---|---|
-| Crash before the DB commit | batch rolled back, offsets not committed | redelivered, written on restart |
-| Crash after the DB commit, before the offset commit | batch redelivered | every event already exists: counted as `rows_deduplicated`, not inserted |
-| Offset commit fails | same as above | idempotent insert |
-| Producer publishes the same run again | same `event_id`s arrive again | deduplicated |
-| Replay with a new group or reset offsets | every event arrives again | deduplicated; no new Parquet rows (only *newly inserted* rows are exported) |
-| Same `event_id`, **different content** | `rows_conflicting` + warning log | first stored version wins, never silently overwritten |
-
-"Same content" is a SHA-256 fingerprint (`payload_sha256`) of the event without `provenance.published_from`. Replaying a stored run therefore counts as a duplicate, not a conflict.
-
-This is **at-least-once delivery + idempotent writes = each event stored once**. It is *not* exactly-once processing: side effects outside the database can repeat, for example a DLQ record published twice by two groups.
-
-Verified on the real broker:
-
-- **Draining the existing topic.** 57,666 messages, including one 24-hour run published twice, became 28,834 stored rows and 28,832 duplicates.
-- **Hard kill.** A consumer killed mid-stream (`TerminateProcess`) and restarted ended with 14,400 / 14,400 rows in the database and Parquet, with no duplicates.
-- **Full replay.** A new group re-read everything and inserted 0 new rows (`tests/integration/test_consumer_integration.py`).
-
-## II.5 SQLite or PostgreSQL
-
-| | SQLite (default) | PostgreSQL (optional) |
-|---|---|---|
-| Setup | nothing: a file at `data/telemetry_store.db` | `docker compose --profile postgres up -d --wait postgres` or any server |
-| Concurrency | one writer at a time (WAL lets readers run alongside) | many writers and readers |
-| Durability settings | `journal_mode=WAL`, `synchronous=FULL` (a committed batch survives power loss; needed because offsets are committed right after) | server-managed |
-| Types | text timestamps in one fixed-width UTC format (`2026-01-01T00:00:00.000000Z`, so text order = time order), REAL | `TIMESTAMPTZ`, `DOUBLE PRECISION`, `JSONB` |
-| Good for | local development, demos, the hackathon | a shared API, several consumer instances, larger data |
-
-Both run **the same SQL**, written once with `?` placeholders (`storage/base.py`). The backends only differ in connection handling, type conversion and error classification (`sqlite_store.py`, `postgres_store.py`). All values are bound parameters, and table/column names come only from constants. Switching needs no code change: `TELEMETRY_DB_BACKEND=postgres` plus `TELEMETRY_POSTGRES_URL`. Passwords are never logged; URLs appear as `postgresql://dco:***@…`.
-
-## II.6 Parquet for history, DuckDB for questions
-
-**Why Parquet.** Columnar and compressed: the 28,834-row demo history is **1.8 MB** on disk, versus about 1.7 KB of JSON per event on the topic. A query reading 2 of 40 columns reads only those 2. Files are immutable, so many readers can scan them safely. Partition directories (`event_date=2026-01-01`) let a query skip whole days.
-
-**Why not write Parquet directly from Kafka.** A Parquet file is not a transaction log, and the database and a file write can't commit atomically. So the database is the durability point, and Parquet is **derived from it** through an export ledger:
-
-1. Each committed batch is recorded in `ingestion_batches`, still unassigned.
-2. When `PARQUET_FLUSH_ROWS` (50,000) rows are waiting, or the oldest has waited `PARQUET_FLUSH_INTERVAL_S` (60 s), or at shutdown, an export job is claimed in one transaction (`parquet_exports`, status `writing`).
-3. Its rows are read back from the database and written as `part-<export_id>-NNNN.parquet.tmp`, then atomically renamed.
-4. The job is marked `done`.
-
-The guarantees that follow:
-
-- A crash anywhere in steps 2–4 leaves the job `writing`. It is redone on the next start, writing the **same file names**, so history is never duplicated.
-- Only rows a batch *newly inserted* belong to it, so Kafka redeliveries never reach Parquet twice.
-- If a Parquet write fails, Kafka offsets are still committed (the data is safe in the database), the job stays pending, and the failure is logged, counted and reported at shutdown (exit 1).
-- Files are bounded (`PARQUET_MAX_ROWS_PER_FILE` 250,000), and the flush threshold avoids tiny files.
-
-**How DuckDB reads it.** `read_parquet('data/telemetry/**/*.parquet', hive_partitioning = true)` treats the directory tree as one table. The partition directories become the columns `region_code` and `event_date`. Nothing is imported into a database or pandas first; DuckDB reads only the needed columns and partitions. Time filters are also applied to `event_date`, so out-of-window days are skipped. The glob ignores `*.tmp`, so half-written files are never read.
-
-## II.7 Event schema seen by the consumer
-
-The consumer accepts exactly the producer's format: schema `1.0`, see section G for a full real example and field-by-field provenance. Contract file: `src/data_engineering/streaming/telemetry_event.v1.schema.json`. `SUPPORTED_SCHEMA_VERSIONS = {"1.0"}`. A future `2.0` must be added to the consumer **before** producers start sending it. Until then, such messages go to the DLQ as `unsupported_schema_version`; they are not lost.
-
-## II.8 Database schema
-
-Two dialect files define the same tables: `db/telemetry_store_sqlite.sql` and `db/telemetry_store_postgres.sql`. Initialization (`db/init_telemetry_store.py`) is separate from consumption, and the consumer refuses an uninitialized database. This store is **separate from the Phase 1 database**, because Phase 1 already has a different `telemetry_readings` table. Init refuses to run against it.
-
-| Table | Key | Purpose |
-|---|---|---|
-| `assets` | (`simulation_run_id`, `asset_id`) | Inventory: data center, region, `asset_type` (= `server_type`), cooling, age, rack position, energy source, the baseline row's labels, provenance (dataset, file checksum, generator, seed), first/last event time. Keyed per run because `SIM-NA-001` is a different simulated machine in every run (the demo store has 24 asset rows for 20 distinct IDs). Updated by upsert; attributes change only if the incoming event is newer, and first/last use `min`/`max` |
-| `telemetry_readings` | `event_id` | One row per event: identifiers, normalized + raw timestamp, `reading_status`, the 16 typed metrics (`NULL` = missing; a `CHECK` forbids values on missing readings), `payload_sha256`, Kafka coordinates, `ingested_at`, `ingest_batch_id`. Indexes: (`asset_id`, `event_timestamp`) for per-asset time ranges, `event_timestamp`, `ingest_batch_id` |
-| `anomaly_records` | (`anomaly_id`, `event_id`) | Only events carrying `labels.injected_anomalies`: `anomaly_type`, `affected_metrics_json`, `label_source = 'simulator_injected'`. There's **no severity column**: the events don't carry one, and nothing here is a detector's output |
-| `ingestion_batches` | `batch_id` | Per batch: group, times, messages received / valid / rejected, rows inserted / deduplicated / conflicting, anomaly rows, DLQ count, per-partition offset ranges, `status` (`persisted` → `committed`, or `commit_failed`), `export_id` |
-| `parquet_exports` | `export_id` | The export ledger: `writing` / `done`, row and batch counts, files, attempts, last error |
-| `schema_migrations` | `version` | Schema version (1) |
-
-**Why typed metric columns and not JSON.** The metric set is fixed by the versioned schema: exactly 16 named properties, with no extra metrics allowed. That isn't dynamic, so typed columns give real types, `CHECK` constraints and efficient filtering. A new metric means `schema_version` 2.0 plus a migration.
-
-## II.9 Parquet layout and schema
-
-```
-data/telemetry/                                   (PARQUET_OUTPUT_DIR; gitignored under data/)
-└── region_code=NA/
-    └── event_date=2026-01-01/
-        └── part-exp-20261013T073621-52e27101-0000.parquet
-```
-
-Columns:
-
-- **Identity and time:** `event_id`, `asset_id`, `simulation_run_id`, `data_center_id`, `region`, `event_timestamp` (`timestamp[us, UTC]`), `event_timestamp_raw`, `slot_index`.
-- **Status and provenance:** `reading_status`, `schema_version`, `source_type`, `timestamp_source`, `published_from`.
-- **Asset and labels:** `asset_type`, the 16 metrics (`float64`, nullable), the three `source_*` labels, `injected_anomalies` (list of `{anomaly_id, anomaly_type, affected_metrics}`).
-- **Kafka coordinates and batch:** `kafka_topic`, `kafka_partition`, `kafka_offset`, `ingested_at`, `ingest_batch_id`, `export_id`.
-
-The schema is declared explicitly in `parquet_sink.FILE_FIELDS` and is identical in every file (tested), with a schema-version file metadata key. Partition values are sanitized: only `A–Z a–z 0–9 . _ -`, never empty or `..`. `PARQUET_PARTITION_STRATEGY=date` drops the region level and keeps `region_code` inside the files.
-
-## II.10 Setup and running
-
-Prerequisites: everything from section E (Python 3.13, uv, Docker Desktop), plus the Phase 1 data if you want to publish simulated events.
-
-```bash
-uv sync                                                  # includes pyarrow, duckdb; psycopg via the dev group
-docker compose up -d --wait kafka
-uv run python -m data_engineering.streaming.topic_setup  # creates datacenter.telemetry AND datacenter.telemetry.dlq
-# topic datacenter.telemetry: already existed, 3 partitions, 1 broker(s)
-# topic datacenter.telemetry.dlq: created, 3 partitions, 1 broker(s)
-uv run python db/init_telemetry_store.py                 # SQLite store, idempotent
-# initialized sqlite:...\data\telemetry_store.db (schema version 1): assets=0, telemetry_readings=0, ...
-```
-
-(Production-style install without dev tools: `uv sync --no-dev --extra postgres`. `requirements.txt` lists the core dependencies only.)
-
-**Run the consumer (SQLite)**
-
-```bash
-uv run python -m data_engineering.streaming.producer simulate --assets 3 --duration-minutes 10   # 30 events
-uv run python -m data_engineering.streaming.consumer --idle-timeout-s 10   # finite: stop 10 s after the last message
-uv run python -m data_engineering.streaming.consumer                        # normal: run until Ctrl+C
-uv run python -m data_engineering.streaming.consumer --max-messages 500     # finite: stop after 500 messages
-```
-
-Options:
-
-- `--max-batches`, `--group-id`, `--topic`, `--dlq-topic`, `--bootstrap-servers`
-- `--db-backend`, `--sqlite-path`, `--parquet-dir`, `--no-parquet`
-
-Exit status: `0` ok · `1` runtime failure (retries exhausted, DLQ unavailable, Parquet backlog at shutdown) · `2` configuration/startup problem.
-
-Ctrl+C (SIGINT), SIGTERM and Ctrl+Break (SIGBREAK) finish the current batch. On shutdown the consumer then:
-
-1. commits the batch's offsets,
-2. exports everything persisted to Parquet,
-3. flushes the DLQ producer,
-4. leaves the group.
-
-The idle timer starts only once partitions are assigned. Right after a crash, Kafka may wait up to the session timeout (45 s) before reassigning the dead member's partitions.
-
-**Run the consumer with PostgreSQL (optional)**
-
-```bash
-# 1. In .env (never commit it):
-#    POSTGRES_PASSWORD=<choose one>
-#    TELEMETRY_DB_BACKEND=postgres
-#    TELEMETRY_POSTGRES_URL=postgresql://dco:<same password>@127.0.0.1:55432/dco
-docker compose --profile postgres up -d --wait postgres
-uv run python db/init_telemetry_store.py
-# initialized postgres:postgresql://dco:***@127.0.0.1:55432/dco (schema version 1): ...
-uv run python -m data_engineering.streaming.consumer --group-id dco-telemetry-sink-pg --parquet-dir data/telemetry_pg --idle-timeout-s 10
-```
-
-A separate group and Parquet directory let SQLite and PostgreSQL both hold the full stream. For an existing server, just point `TELEMETRY_POSTGRES_URL` at it. One-off overrides in PowerShell: `$env:TELEMETRY_DB_BACKEND = "postgres"`. In Git Bash: `TELEMETRY_DB_BACKEND=postgres uv run ...`.
-
-## II.11 Querying with DuckDB
-
-All commands print JSON. The sample outputs below are from the first full drain of the topic in this session; yours depend on what was published. `--start` is inclusive and `--end` exclusive, in UTC. Asset IDs repeat across simulation runs, so `overview` lists the runs and `--run` selects one.
-
-```bash
-Q="uv run python -m data_engineering.analytics.query_telemetry"     # Git Bash; in PowerShell type the command out
-$Q overview
-#   "rows": 28834, "distinct_event_ids": 28834, "assets": 20, "files": 1, "missing_readings": 311,
-#   "runs": {"sim-c9944cc35156": 28800, "sim-0531de355e95": 28, "sim-12b37278e5e8": 6}
-$Q readings SIM-NA-001 --run sim-c9944cc35156 --start 2026-01-01T00:00:00Z --end 2026-01-01T00:03:00Z --metrics cpu_utilization power_consumption_kw
-$Q stats --metrics power_consumption_kw inlet_temperature_c --all-assets
-#   power_consumption_kw: readings 28523, nulls 311, avg 118.35, min 32.987, max 448.364
-$Q counts --bucket hour --asset SIM-NA-004 --run sim-c9944cc35156   # 24 buckets x 60 events, observed/missing split
-$Q anomalies --bucket day --run sim-c9944cc35156                    # explicit injected labels per asset and type
-$Q completeness SIM-NA-001 --run sim-c9944cc35156 --start 2026-01-01T00:00:00Z --end 2026-01-02T00:00:00Z
-#   "expected_slots": 1440, "events": 1440, "observed_readings": 1428, "missing_readings": 12,
-#   "absent_slots": 0, "duplicate_events": 0, "absent_intervals": []
-```
-
-`completeness` separates **missing readings** (the producer reported the slot with `null` metrics) from **absent slots** (no event at all, i.e. lost or never published), and lists absent intervals. Without `--run`, two runs of the same asset show up as `duplicate_events`.
-
-In Python: `TelemetryAnalytics("data/telemetry").metric_stats(["cpu_utilization"], start, end, run_id=...)`.
-
-All values are bound parameters. Metric names must be in the schema's 16-metric allowlist, and bucket units in `minute|hour|day`. Anything else is a `ValueError` (the CLI also rejects it at argument parsing). An empty or missing directory returns empty results, not an error.
-
-## II.12 Tests
-
-| Command | What runs | Needs |
-|---|---|---|
-| `uv run pytest` | all unit tests: validation, store, consumer (mocked Kafka), Parquet export/recovery, DuckDB, plus Part I tests | nothing |
-| `TELEMETRY_TEST_POSTGRES_URL=postgresql://dco:<pw>@127.0.0.1:55432/dco uv run pytest -m postgres` | every store test again on PostgreSQL, in a throwaway schema | a PostgreSQL server |
-| `uv run pytest -m integration` | real broker: produce → consume → SQLite + DLQ + Parquet → DuckDB, restart, full replay | `docker compose up -d kafka` |
-
-Without `TELEMETRY_TEST_POSTGRES_URL`, the PostgreSQL variants are reported as **skipped**, not passed.
-
-Results at the time of writing, with everything enabled: **210 passed, 1 skipped**. The skip is a real-pandas check; pandas isn't a dependency.
-
-Files:
-
-- `test_event_validation.py`, `test_telemetry_store.py`, `test_consumer.py`, `test_parquet_export.py`, `test_duckdb_queries.py`
-- `integration/test_consumer_integration.py`
-- Helpers in `kafka_fakes.py` and `telemetry_helpers.py`
-
-## II.13 Verifying counts across Kafka, the database and Parquet
-
-```bash
-export MSYS_NO_PATHCONV=1   # Git Bash only
-# Kafka: messages in the topic (sum of end offsets) and this group's position/lag
-docker compose exec kafka /opt/kafka/bin/kafka-get-offsets.sh --bootstrap-server localhost:9092 --topic datacenter.telemetry
-docker compose exec kafka /opt/kafka/bin/kafka-consumer-groups.sh --bootstrap-server localhost:9092 --describe --group dco-telemetry-sink
-# Database: what the consumer saw and stored
-uv run python -c "import sqlite3; c=sqlite3.connect('data/telemetry_store.db'); print(c.execute('select sum(messages_received), sum(events_valid), sum(events_rejected), sum(rows_inserted), sum(rows_deduplicated), sum(rows_conflicting) from ingestion_batches').fetchone(), c.execute('select count(*), count(distinct event_id) from telemetry_readings').fetchone())"
-# Parquet: rows and distinct events
-uv run python -m data_engineering.analytics.query_telemetry overview
-```
-
-The identities that must hold, with the real numbers from the first drain in this session:
-
-- **Kafka messages consumed** (offsets, lag 0) = `messages_received` = valid + rejected: 57,666 = 57,666 + 0.
-- **Rows in `telemetry_readings`** = Σ `rows_inserted` = valid − deduplicated − conflicting: 28,834 = 57,666 − 28,832 − 0.
-- **Parquet rows** = DB rows, once `parquet_exports` has no `writing` jobs and no batch has `export_id IS NULL` with rows: 28,834 = 28,834, distinct 28,834.
-- **DLQ records** ≥ rejected. They can exceed it after restarts or with several groups (at-least-once).
-
-## II.14 Troubleshooting
-
-| Symptom (actual messages) | Meaning / fix |
-|---|---|
-| `consumer could not start ... cannot reach Kafka at 127.0.0.1:9092`, exit 2 | Broker down or wrong `KAFKA_BOOTSTRAP_SERVERS`. See section I |
-| `topic(s) ['datacenter.telemetry.dlq'] not found. Create them with ...topic_setup`, exit 2 | Run `uv run python -m data_engineering.streaming.topic_setup` (auto-creation is disabled) |
-| `telemetry store schema version is None, expected 1. Run ... db/init_telemetry_store.py first.`, exit 2 | Initialize the store (`TELEMETRY_DB_BACKEND` decides which) |
-| `this database already has a different telemetry_readings table (the Phase 1 database?)` | `TELEMETRY_SQLITE_PATH` points at `data/datacenter_ops.db`. Use the default `data/telemetry_store.db` |
-| `ConnectionTimeout: connection timeout expired`, exit 2 | PostgreSQL not reachable at startup: `docker compose --profile postgres ps`, check URL and password |
-| `database write failed; retrying` ... then `database write failed (transient, retries exhausted)`, exit 1 | Database outage longer than the retry budget. Nothing was committed; fix the database and start the consumer again, and it resumes exactly there. *Measured:* a 5.2 s PostgreSQL restart mid-run was absorbed by 2 retries; a permanent outage stopped the consumer with lag unchanged, and the rerun processed all 120 pending events |
-| Restart right after a crash reads nothing for a while | The crashed member still holds the partitions until `KAFKA_SESSION_TIMEOUT_MS` (45 s) expires. A clean stop leaves the group immediately |
-| `message rejected` with `reason` (first 5 per reason are logged) | Bad producer data. Inspect the DLQ topic: `docker compose exec kafka /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic datacenter.telemetry.dlq --from-beginning --property print.key=true` |
-| `unsupported_schema_version` in the DLQ | A producer sends a newer schema. Upgrade the consumer, then re-publish from the source (DLQ records keep the original payload) |
-| `DLQ publish not confirmed; retrying` → `could not be published to datacenter.telemetry.dlq`, exit 1 | DLQ topic or broker unavailable. Offsets stop just before the poison message; nothing is lost. Fix and restart |
-| `offset commit failed` / `giving up on this commit` | Typically a rebalance. Harmless: the events are stored, will be redelivered, and counted as `rows_deduplicated` |
-| `rows_deduplicated` high | Expected after republishing, replays or restarts |
-| `conflicting duplicates: same event_id, different content` | The same event ID arrived with different data, i.e. a producer bug. The first version is kept; see `rows_conflicting` in `ingestion_batches` |
-| Reprocess everything on purpose | Stop the consumer, then `docker compose exec kafka /opt/kafka/bin/kafka-consumer-groups.sh --bootstrap-server localhost:9092 --group dco-telemetry-sink --topic datacenter.telemetry --reset-offsets --to-earliest --execute`. Safe thanks to idempotent writes |
-| `parquet export failed; it stays pending` / `parquet export backlog remains ... at shutdown`, exit 1 | Disk full, permissions, or the database down during export. Rows are safe in the database. Fix and start the consumer again: pending exports are redone first. Inspect with `select * from parquet_exports where status = 'writing'` |
-| DuckDB shows more rows per asset than expected | Several runs share asset IDs. Use `--run` (see `overview` → `runs`) |
-
----
-
-# Part III: Cooling State Estimator
-
-A **deterministic, rules-based, read-only** component. It reads the latest telemetry plus a rolling history from the telemetry store (Part II) and returns a structured snapshot of the thermal and operational state, for one asset or for the whole data center. It does **not** optimize anything, change cooling settings, call an LLM, schedule itself or consume Kafka. It is exposed as `GET /api/v1/telemetry/cooling-state` and as a CLI.
-
-## III.0 API structure (`src/app/`)
-
-The HTTP API is the `app` package, next to the pipeline package `data_engineering`. Both are built from `src/` (`[tool.uv.build-backend] module-name = ["data_engineering", "app"]`). Its layout follows the domain-module convention: one package per business domain, each with its own router, schemas, dependencies, service and exceptions. Modules are added when a domain is actually built; there are no placeholder stubs.
-
-```
-src/app/
-├── main.py              # the single FastAPI entry point; lifespan creates the shared objects
-├── config.py            # AppSettings (pydantic-settings, API_ prefix)
-├── constants.py         # title, version, /api/v1 prefix, request-ID header
-├── exceptions.py        # AppError hierarchy + handlers rendering every error as ErrorResponse
-├── middleware.py        # request ID + access log, security headers, optional CORS
-├── database.py          # StoreFactory + get_db_session (wraps the existing store, no ORM)
-├── api/v1/router.py     # aggregates domain routers; /health
-├── telemetry/           # domain module (copy this layout for new domains)
-│   ├── router.py        # GET /telemetry/cooling-state
-│   ├── schemas.py       # CoolingStateQuery (query parameters) + CoolingStateSnapshot (response)
-│   ├── dependencies.py  # get_cooling_config, get_telemetry_service
-│   ├── service.py       # TelemetryService: runs the estimator, maps errors to domain exceptions
-│   ├── exceptions.py    # AssetNotFoundError, RunNotFoundError, InvalidTelemetryQueryError
-│   └── constants.py     # ID pattern, window bounds
-└── common/
-    ├── schemas/base.py       # CustomModel (extra="forbid"), UtcDatetime (timezone required, normalized to UTC)
-    ├── schemas/responses.py  # ErrorResponse
-    ├── logging.py            # dco.api.* loggers (same JSON log stream as the pipeline)
-    └── security/headers.py   # security-headers ASGI middleware
-```
-
-Not created yet, because none of it exists: `auth/`, `rag/`, `agents/`, `cognition/`, `execution/`, `llm/`, `guardrails/`, `providers/`, `evaluation/`, `pagination.py`, shared `models.py` (no ORM) and `docs/standards/`. Endpoints are **unauthenticated**, so bind to 127.0.0.1.
-
-**Lifespan.** Created once at startup:
-- the validated cooling config (an invalid `config/cooling_state.yaml` **stops startup**);
-- the `StoreFactory`;
-- the threadpool limiter size (`API_THREADPOOL_TOKENS`).
-
-A database that is down at startup does not stop the app; requests return 503 until it's back.
-
-**Database.** `get_db_session` opens one store connection per request and closes it afterwards. Handlers are sync `def`, so database work runs in the threadpool, never on the event loop. FastAPI runs the sync dependency and the handler in *different* worker threads. So SQLite connections are opened with `check_same_thread=False`, and each is used by one thread at a time. A concurrency test caught this; the earlier single-file API had the same latent bug.
-
-**Errors.** Every non-2xx response, including validation errors, unknown routes, 405s and unexpected exceptions, has one shape. The submitted input is never echoed back:
-
-```json
-{"error": {"code": "unknown_asset", "message": "asset 'NOPE' not found in simulation run 'sim-c9944cc35156'", "details": null},
+{"error": {"code": "unknown_asset", "message": "asset 'NOPE' not found in simulation run 'sim-...'", "details": null},
  "request_id": "41450fa8bec24571bfd1a8de27df8784"}
 ```
 
-**Middleware.**
-- `X-Request-ID` is accepted if well-formed (`[A-Za-z0-9._-]{1,64}`), otherwise generated, and echoed on every response.
-- One access-log line per request, recording the path without the query string.
-- Security headers: `nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, and a strict CSP plus `no-store` on everything except `/docs`.
-- CORS only for `API_CORS_ORIGINS`.
-
-**Paths.** `/api/v1/health` and `/api/v1/telemetry/cooling-state`. The pre-v1 `/api/health` and `/api/telemetry/cooling-state` still answer, as deprecated aliases hidden from the OpenAPI schema.
-
-**Tests.**
-- `tests/telemetry/test_cooling_state_api.py`
-- `tests/security/api/test_http_hardening.py`
-- `tests/test_app_lifecycle.py`
-
-They use an async client (`httpx.AsyncClient` + `ASGITransport`) with the real lifespan; fixtures are in `tests/conftest.py`.
-
-
-## III.1 What the data provides (inspected, not assumed)
-
-**Source table.** `telemetry_readings` in the consumer's store: SQLite `data/telemetry_store.db` or PostgreSQL, selected by `TELEMETRY_DB_BACKEND`. Each row is one reading for one `(simulation_run_id, asset_id)` at one `event_timestamp`. `assets` supplies `asset_type` and the newest event and ingest times.
-
-**Fields the estimator uses** (units from the event schema, inferred from column names):
-
-| Group | Field | Unit |
-|---|---|---|
-| Thermal | `inlet_temperature_c`, `exhaust_temperature_c` | °C |
-| Workload | `cpu_utilization`, `gpu_utilization` | % |
-| Workload | `workload_intensity` | 0–1 |
-| Cooling / airflow | `fan_speed_rpm` | rpm |
-| Cooling / airflow | `airflow_cfm` | cfm |
-| Electrical | `power_consumption_kw` | kW, per asset |
-| Electrical | `pue` | ratio |
-
-`reading_status` says whether the slot was `observed` or `missing`.
-
-**Not available, and reported as such:**
-
-- **Cooling efficiency.** The Kaggle rows have a static value, but the simulator doesn't produce it per minute.
-- **Power-supply efficiency and WUE.** Same situation.
-- **Cooling power.** The schema has only per-asset `power_consumption_kw`, so nothing is labeled cooling power and no energy savings are computed.
-- **Equipment limits.** None exist in the data or the documentation.
-
-**GPU.** Compute, Edge and Storage servers report `gpu_utilization = 0.0` in every row. That's structural, not a measurement, so for them the GPU metric is `applicable: false` with values `null`, and it's left out of workload and aggregate calculations.
-
-**Two clocks.**
-
-- `event_timestamp` is the measurement time, which is simulated: 2026-01-01.
-- `ingested_at` is the wall-clock time the consumer stored the row.
-
-The window is `(as_of − window, as_of]` in event time. `as_of` is the newest reading of the run, unless you pass one explicitly. Freshness is checked on both clocks (see DQ rules).
-
-**Runs.** Simulated asset IDs repeat in every simulation run. So every evaluation is scoped to one run: by default the run that most recently received readings, or `run_id=…`.
-
-## III.2 Metrics (per asset)
-
-For each metric in each asset's window. Readings are sorted by `event_timestamp`. Same-timestamp rows are collapsed (the newest `ingested_at` wins; differing duplicates are counted). Missing values are excluded, never set to 0.
-
-| Field | Meaning |
-|---|---|
-| `latest`, `latest_timestamp`, `latest_age_seconds` | newest observed value and how far it is behind `as_of` |
-| `first`, `change`, `change_elapsed_minutes` | first observed value, `latest − first`, and the real elapsed time between them |
-| `mean`, `minimum`, `maximum`, `std_dev` | over observed values (population standard deviation) |
-| `trend_per_minute` | least-squares slope against **actual elapsed minutes** (gaps and irregular spacing don't distort it); needs `min_points` (5) |
-| `recent_rate_per_minute` | the same slope over the last `recent_minutes` (5); needs ≥ 3 readings |
-| `direction` | `increasing` / `decreasing` / `stable`: `trend × elapsed` compared with `trend_min_change` (config, in the metric's unit). Unknown (`null`) with too few readings |
-| `observed_points`, `null_points`, `sufficient_points` | how much data the numbers rest on |
-
-**Derived.** `temperature_delta_c` = exhaust − inlet of the **same** reading.
-
-**Workload direction.** Combines CPU, workload intensity, and GPU where applicable. Agreeing non-stable directions win, disagreement gives `mixed`, all stable gives `stable`.
-
-**Data-center scope.** Every asset is computed separately; readings of different assets are never merged into one series. `metrics` then holds statistics of each asset's own values:
-
-- `mean_of_latest`, `min_of_latest`, `max_of_latest` (+ `max_asset_id`)
-- `mean_trend_per_minute`, `max_trend_per_minute` (+ asset)
-- direction counts
-- `sum_of_latest` for power only, because it's the one additive quantity
-
-`assets` lists every asset's state.
-
-## III.3 Rules
-
-All thresholds live in `config/cooling_state.yaml`, which can be overridden with `COOLING_STATE_CONFIG=<path>`. **Every equipment limit ships as `null`.** A rule whose limit is unset is not evaluated; it's listed in `rules_not_evaluated` with the reason. The config cites ASHRAE TC 9.9's *recommended* 18–27 °C inlet envelope only as a reference to confirm against your own equipment.
-
-| Rule | Kind | Fires when | State | Severity |
-|---|---|---|---|---|
-| `TH_INLET_ABOVE_LIMIT` | observation | latest inlet ≥ `inlet_temperature_high_c` | HIGH_THERMAL_LOAD | WARNING (CRITICAL if ≥ `inlet_temperature_critical_c`) |
-| `TH_EXHAUST_ABOVE_LIMIT` | observation | latest exhaust ≥ `exhaust_temperature_high_c` | HIGH_THERMAL_LOAD | WARNING |
-| `TH_DELTA_ABOVE_LIMIT` | observation | latest exhaust − inlet ≥ `temperature_delta_high_c` | HIGH_THERMAL_LOAD | WARNING |
-| `TH_SUSTAINED_INLET_RISE` | inference | window inlet trend ≥ `sustained_inlet_rise_c_per_minute` | HIGH_THERMAL_LOAD | WARNING |
-| `TH_RAPID_INLET_RISE` | inference | recent inlet rate ≥ `rapid_inlet_rise_c_per_minute` | RAPID_TEMPERATURE_RISE | WARNING |
-| `AF_AIRFLOW_DROP_WITH_RISING_TEMPERATURE` | inference | airflow fell ≥ `airflow_drop_fraction` over the window **and** inlet or delta is increasing | POTENTIAL_AIRFLOW_ISSUE | WARNING |
-| `AF_FAN_AIRFLOW_DIVERGENCE` | inference | fan speed rose ≥ `fan_airflow_divergence_fraction` while airflow did not rise (airflow tracks fan speed in this dataset, r = +0.995) | POTENTIAL_AIRFLOW_ISSUE | WARNING |
-| `WL_INCREASING` / `WL_DECREASING` | observation | workload direction | (context only) | INFO |
-| `DQ_NO_READINGS` | data_quality | no observed reading in the window | INSUFFICIENT_DATA | WARNING |
-| `DQ_INSUFFICIENT_POINTS` | data_quality | fewer than `min_points` inlet readings; trend rules then skipped | DATA_QUALITY_ISSUE | WARNING |
-| `DQ_STALE_ASSET` | data_quality | the asset's newest reading lags `as_of` by > `stale_after_seconds` (event time) | DATA_QUALITY_ISSUE | WARNING |
-| `DQ_PIPELINE_STALE` | data_quality | nothing stored for > `max_ingest_age_seconds` (wall clock) | DATA_QUALITY_ISSUE | WARNING |
-| `DQ_LOW_COVERAGE` | data_quality | observed / expected readings < `min_coverage` | DATA_QUALITY_ISSUE | WARNING |
-| `DQ_MISSING_READINGS` | data_quality | explicitly missing share > `max_missing_fraction` | DATA_QUALITY_ISSUE | WARNING |
-| `DQ_TIMESTAMP_GAPS` | data_quality | an interval > `gap_tolerance_factor` × `expected_interval_seconds` | DATA_QUALITY_ISSUE | WARNING |
-| `DQ_IRREGULAR_INTERVALS` | data_quality | an interval much shorter than expected | DATA_QUALITY_ISSUE | WARNING |
-| `DQ_DUPLICATE_TIMESTAMPS` | data_quality | rows shared a timestamp | DATA_QUALITY_ISSUE if their values differ (WARNING), else INFO | |
-| `DQ_NO_TELEMETRY` | data_quality | the store has no readings at all | INSUFFICIENT_DATA | WARNING |
-
-Lower fan speed or lower airflow alone are **not** flagged: neither is assumed efficient or safe. The airflow rules need an accompanying temperature or fan signal. Their findings say *potential* and "not a confirmed hardware fault".
-
-**Precedence (deterministic).** All findings are always returned; the precedence only decides the headline state.
-
-1. `INSUFFICIENT_DATA` when the scope has no usable readings. One silent asset in a data-center snapshot counts as a data-quality issue instead.
-2. Otherwise, the state of the most severe finding (CRITICAL > WARNING). Ties go HIGH_THERMAL_LOAD > RAPID_TEMPERATURE_RISE > POTENTIAL_AIRFLOW_ISSUE > DATA_QUALITY_ISSUE.
-3. Otherwise, `PARTIALLY_ASSESSED` if any thermal or airflow rule could not run (unset limit, too few readings), and `NORMAL` only if every rule ran and none fired. INFO findings never change the state.
-
-**Checked against the simulator's ground truth.** The default run injected a `thermal_rise` on SIM-NA-013 from 13:37 to 14:18: a ramp over the first third, then a hold. Using trial limits (inlet 22 °C, sustained 0.08 and rapid 0.15 °C/min):
-
-| as_of | Findings |
-|---|---|
-| 13:30 | none |
-| 13:45 | sustained + rapid rise |
-| 13:52 | above limit + sustained rise |
-| 14:10 | above limit only (plateau; the rise rules correctly stop) |
-| 14:30 | none (anomaly over) |
-
-The estimator never reads the anomaly labels; they're used only for this check.
-
-## III.4 API and CLI
+| Method | Path | Purpose | Writes? |
+|---|---|---|---|
+| GET | `/health` | Store reachability and schema version (no auth) | no |
+| GET | `/dashboard/overview` | KPIs, freshness, thermal risk, trends, anomaly labels, alert counts | no |
+| GET | `/telemetry/cooling-state` | Estimator snapshot (asset or data center) | no |
+| GET | `/telemetry` | History for one or all assets, raw or `1m/5m/15m/1h` buckets | no |
+| GET | `/assets`, `/assets/{asset_id}`, `/assets/{asset_id}/telemetry` | Asset list with freshness; detail with latest reading and cooling state; history | no |
+| GET | `/cooling-model/evaluate` | Offline metrics and validity of the active model | no |
+| GET | `/cooling-model/predict` | Forecast (503 when no model) | no |
+| POST | `/cooling/predict` | Forecast with explicit `AVAILABLE`/`UNAVAILABLE` status and reasons | no |
+| POST | `/cooling-optimizer/recommend` | Optimizer over the configured grid | no |
+| POST | `/cooling/optimize` | Optimizer over operator-supplied candidates | no |
+| GET | `/energy/fan-peer-comparison` | Fan over-speed vs comparable peers per asset (relative only, no kW) | no |
+| POST | `/cooling-model/train` | Retrain + activate (403 unless enabled; 409 while running) | artifact files |
+| POST | `/recommendations/generate` | Run the LangGraph workflow for one asset | analysis, recommendations, alerts |
+| GET | `/recommendations`, `/recommendations/{id}`, `/recommendations/analyses/{id}`, `/recommendations/agents/status` | List (keyset cursor), detail with decisions, execution trace, configuration | no |
+| POST | `/recommendations/{id}/decisions` | Record a human review decision | decision row |
+| GET | `/alerts`, `/alerts/{alert_id}` | Alerts captured at generation time | no |
+| POST | `/copilot/chat` | Natural-language question → validated answer with evidence | in-memory conversation only |
+| GET | `/digital-twin/layout`, `/digital-twin/layout/{object_id}` | Hierarchy and coordinates | no |
+| GET | `/digital-twin/state`, `/digital-twin/overlays` | Batch state; overlay values and bands | no |
+| GET | `/digital-twin/assets/{object_id}` | Inspection panel | no |
+| POST | `/digital-twin/analyze` | Copilot analysis of the selected object | in-memory conversation only |
+| GET | `/digital-twin/stream` | SSE live updates | no |
 
 ```bash
-uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
-curl "http://127.0.0.1:8000/api/v1/health"
-curl "http://127.0.0.1:8000/api/v1/telemetry/cooling-state"                                   # data center, newest run
-curl "http://127.0.0.1:8000/api/v1/telemetry/cooling-state?asset_id=SIM-NA-013&window_minutes=30"
-curl "http://127.0.0.1:8000/api/v1/telemetry/cooling-state?run_id=sim-c9944cc35156&asset_id=SIM-NA-013&as_of=2026-01-01T13:45:00Z"
+curl "http://127.0.0.1:8000/api/v1/telemetry/cooling-state?asset_id=SIM-NA-013&run_id=sim-c9944cc35156"
+curl -X POST http://127.0.0.1:8000/api/v1/cooling/predict -H "Content-Type: application/json" \
+     -d '{"asset_id": "SIM-NA-013", "run_id": "sim-c9944cc35156"}'
+curl -X POST http://127.0.0.1:8000/api/v1/copilot/chat -H "Content-Type: application/json" \
+     -d '{"message": "What should we investigate first?"}'
 ```
 
-Interactive docs are at `http://127.0.0.1:8000/docs`.
-
-| Parameter | Validation |
-|---|---|
-| `asset_id`, `run_id` | `^[A-Za-z0-9._:-]{1,64}$` |
-| `window_minutes` | 1–1440 |
-| `as_of` | must include a timezone |
-
-| Response | When |
-|---|---|
-| `200` | snapshot, including `INSUFFICIENT_DATA` for an empty store |
-| `404` | `unknown_asset` / `unknown_run` |
-| `422` | `validation_error` (bad or unknown parameter, `as_of` without a timezone) / `invalid_parameter` |
-| `503` | `database_unavailable` / `store_not_initialized` |
-| `500` | `internal_error` (unexpected; generic message only) |
-
-An invalid `config/cooling_state.yaml` stops the API at startup instead of failing requests. Errors use the `ErrorResponse` shape from III.0. Handlers are sync, so database work runs in the threadpool; each request opens and closes its own connection. PostgreSQL connections time out after `API_DB_CONNECT_TIMEOUT_S` (3 s).
-
-The CLI prints the same JSON and can override limits for one run without editing the config:
-
-```bash
-uv run python -m data_engineering.cooling.estimator --asset SIM-NA-013 --run sim-c9944cc35156 \
-  --as-of 2026-01-01T13:45:00Z --set-limit inlet_temperature_high_c=27 \
-  --set-limit sustained_inlet_rise_c_per_minute=0.08 --set-limit rapid_inlet_rise_c_per_minute=0.15
-```
-
-**Example response** for that command. It's real output, but trimmed: 3 of 11 metrics, 2 of 5 `rules_not_evaluated`, 1 of 3 notes. `DQ_PIPELINE_STALE` is present because no producer was running at the time.
-
-```json
-{
-  "schema_version": "1.0", "evaluated_at": "2026-10-13T08:47:36.151090Z",
-  "as_of": "2026-01-01T13:45:00Z", "window_minutes": 15, "window_start": "2026-01-01T13:30:00Z",
-  "scope": {"level": "asset", "asset_id": "SIM-NA-013", "asset_type": "Compute",
-            "simulation_run_id": "sim-c9944cc35156", "data_center_id": "dc-na-sim-001"},
-  "state": "HIGH_THERMAL_LOAD", "severity": "WARNING", "workload_direction": "stable",
-  "metrics": {
-    "inlet_temperature_c": {"unit": "degC", "source": "telemetry", "available": true, "applicable": true,
-      "reason": null, "observed_points": 15, "null_points": 0, "sufficient_points": true,
-      "latest": 21.509, "latest_timestamp": "2026-01-01T13:45:00Z", "latest_age_seconds": 0.0,
-      "mean": 20.3748, "minimum": 19.771, "maximum": 21.509, "std_dev": 0.592640666846277,
-      "first": 19.771, "change": 1.7379999999999995, "change_elapsed_minutes": 14.0,
-      "trend_per_minute": 0.13141785714285714, "recent_rate_per_minute": 0.1897000000000002,
-      "direction": "increasing"},
-    "gpu_utilization": {"unit": "percent", "applicable": false,
-      "reason": "asset_type 'Compute' has no GPU; the telemetry value (0) is structural, not a measured utilization",
-      "latest": null, "mean": null, "trend_per_minute": null, "direction": null, "...": "other fields null/0"},
-    "cooling_efficiency": {"unit": "ratio", "available": false,
-      "reason": "not in the telemetry schema v1.0: the Kaggle source has a static per-row cooling_efficiency, but the simulator does not produce it per minute",
-      "latest": null, "...": "other fields null/0"}
-  },
-  "findings": [
-    {"rule_id": "TH_SUSTAINED_INLET_RISE", "state": "HIGH_THERMAL_LOAD", "severity": "WARNING", "kind": "inference",
-     "asset_id": "SIM-NA-013",
-     "explanation": "Inlet temperature is rising 0.1314 deg C/min over the window (threshold 0.08 deg C/min).",
-     "evidence": {"rate_c_per_minute": 0.1314, "threshold_c_per_minute": 0.08, "latest": 21.509,
-                  "change_over_window": 1.738, "elapsed_minutes": 14.0}},
-    {"rule_id": "TH_RAPID_INLET_RISE", "state": "RAPID_TEMPERATURE_RISE", "severity": "WARNING", "kind": "inference",
-     "asset_id": "SIM-NA-013",
-     "explanation": "Inlet temperature is rising 0.1897 deg C/min over the last 5 minutes (threshold 0.15 deg C/min).",
-     "evidence": {"rate_c_per_minute": 0.1897, "threshold_c_per_minute": 0.15, "latest": 21.509,
-                  "change_over_window": 1.738, "elapsed_minutes": 14.0}},
-    {"rule_id": "DQ_PIPELINE_STALE", "state": "DATA_QUALITY_ISSUE", "severity": "WARNING", "kind": "data_quality",
-     "asset_id": null,
-     "explanation": "No telemetry was stored for 4295 s (wall clock); the stream may have stopped, so the snapshot may not reflect the current state.",
-     "evidence": {"ingest_age_seconds": 4295.2, "max_ingest_age_seconds": 300}}
-  ],
-  "rules_not_evaluated": [
-    {"rule_id": "TH_EXHAUST_ABOVE_LIMIT", "reason": "limits.exhaust_temperature_high_c is not configured", "asset_id": "SIM-NA-013"},
-    {"rule_id": "TH_DELTA_ABOVE_LIMIT", "reason": "limits.temperature_delta_high_c is not configured", "asset_id": "SIM-NA-013"}
-  ],
-  "data_quality": {"status": "DEGRADED", "stale": true, "ingest_age_seconds": 4295.2, "expected_points": 15,
-    "present_points": 15, "observed_points": 15, "missing_readings": 0, "duplicate_timestamps": 0,
-    "conflicting_duplicates": 0, "irregular_intervals": 0, "median_interval_seconds": 60.0, "coverage": 1.0,
-    "gaps": [], "missing_fields": [], "unavailable_fields": ["cooling_efficiency"],
-    "warnings": ["DQ_PIPELINE_STALE: No telemetry was stored for 4295 s (wall clock); the stream may have stopped, so the snapshot may not reflect the current state."]},
-  "assets": [], "source_type": "simulated",
-  "notes": ["All telemetry is simulated (source_type=simulated) from an engineered synthetic Kaggle dataset; this is not real operational telemetry."]
-}
-```
-
-The response schema (`CoolingStateSnapshot`, `src/data_engineering/cooling/models.py`) is validated by Pydantic, and FastAPI publishes it at `/openapi.json`.
-
-## III.5 Verify against the live stream
-
-```bash
-docker compose up -d --wait kafka
-uv run python -m data_engineering.streaming.consumer                                                   # terminal 1
-uv run python -m data_engineering.streaming.producer simulate --assets 5 --seed 21 --continuous --speedup 60   # terminal 2
-uv run uvicorn app.main:app --host 127.0.0.1 --port 8000                                 # terminal 3
-curl "http://127.0.0.1:8000/api/v1/telemetry/cooling-state"        # after ~20 s, so the 15-minute window is full
-```
-
-Measured in this session:
-
-- **While streaming:** the newest run is picked automatically, `ingest_age_seconds` ≈ 1.2, coverage 1.0, state `PARTIALLY_ASSESSED` (limits unset), 30–45 ms per request.
-- **After stopping the producer** (with a demo `max_ingest_age_seconds: 10`): `DQ_PIPELINE_STALE` and `DATA_QUALITY_ISSUE`.
-
-To see thermal rules fire, set limits in `config/cooling_state.yaml`, or use `--set-limit` with the CLI.
-
-## III.6 Tests
-
-`uv run pytest tests/test_cooling_metrics.py tests/test_cooling_estimator.py tests/test_cooling_api.py`: 64 tests on controlled fixtures written through the real store. They cover:
-
-- **Normal and rules:** stable/NORMAL, unset limits → PARTIALLY_ASSESSED, rapid and sustained rise with precedence, limit and critical tier, exhaust/delta limits.
-- **Workload and airflow:** increasing/decreasing workload, GPU not applicable, airflow drop with rising temperature (and airflow drop alone not flagged), fan/airflow divergence.
-- **Data quality:** missing CPU, unavailable cooling efficiency, explicit missing readings, stale asset, stopped pipeline, gaps, duplicate timestamps (identical and conflicting), low coverage, too few points.
-- **Scope:** empty store, an empty window, unknown asset/run, data-center aggregation without mixing assets, one silent asset, separate runs, the window parameter.
-- **Configuration:** 11 invalid-config cases, missing config file.
-- **API:** parameters, 404 / 422 / 500 / 503, a real unreachable PostgreSQL URL (no credential leak), a query failing mid-request, health.
-
-## III.7 Limitations
-
-- **Every limit is unset by design.** Until you configure them, the estimator reports `PARTIALLY_ASSESSED`, never `NORMAL`. The default trend sensitivities (`trend_min_change`) are analysis heuristics, not limits.
-- **Missing indicators.** Cooling efficiency, power-supply efficiency, WUE, cooling power and rack- or room-level sensors don't exist in the telemetry. There is no asset → rack → room topology beyond `rack_u_position`, so "data center" means "all assets of the run".
-- **Trends are straight-line fits.** A step change inside the window (e.g. a power spike that ended) shows up as a trend; compare `recent_rate_per_minute` and `std_dev`. Observed on SIM-NA-003: an injected power spike ending at 00:11 produced `power … direction=decreasing` while power had in fact been flat since.
-- **No hysteresis or memory.** Each request is evaluated independently, so the state can flip on consecutive requests near a threshold.
-- **Time semantics.** Event time is simulated. `DQ_PIPELINE_STALE` uses wall-clock ingest time; `DQ_STALE_ASSET` uses event time.
-- **Workload.** `workload_direction` combines directions, not magnitudes.
-- **The API is unauthenticated.** It's local development only (bind to 127.0.0.1).
+Not implemented (no route exists): telemetry ingestion over HTTP, recommendation "resolve/close", alert
+acknowledgement, DuckDB analytics over HTTP, any control endpoint. See
+[docs/API.md §Planned](docs/API.md#planned-not-implemented).
 
 ---
 
-## Appendix: Phase 1 (dataset → SQLite → simulation)
+## 11. Database and data model
 
-**Dataset findings** (details: [`docs/dataset/README.md`](docs/dataset/README.md)):
-- `green_ai_datacenter.csv` is 100,000 rows × 35 columns with 0 empty cells.
-- There are no timestamps and no equipment IDs.
-- `failure_risk_level` and `energy_efficiency_class` labels are present.
-- Regions: EU 37,972 · **NA 28,801** · APAC 27,133 · ME 6,094.
-- **Pitfall:** the North America code is the literal string `NA`, which pandas' default `read_csv` turns into a null. Project code reads with the `csv` module.
+Two separate SQLite files (or PostgreSQL for the second):
 
-**Kaggle download.** The public dataset downloads anonymously with Kaggle CLI 2.x (`uv run python -m data_engineering.ingestion.download_dataset`). If Kaggle asks for authentication, run `uv run kaggle auth login`, or set `KAGGLE_API_TOKEN`, or place a legacy `kaggle.json` in `~/.kaggle/`. Never commit tokens.
+- **Phase 1 database** `data/datacenter_ops.db` (`db/schema.sql`): `source_records` (all 100,000 rows,
+  `provenance='dataset'`), the NA subset, stored simulation runs, and injected-anomaly tables. The
+  producer reads its baseline rows from here.
+- **Telemetry store** `data/telemetry_store.db` or PostgreSQL (`db/telemetry_store_{sqlite,postgres}.sql`,
+  schema version 2). It is the system of record served by the API.
 
-**Step by step** (`uv run python -m data_engineering.pipeline` runs all of these, then validation):
+| Table | Key | Role |
+|---|---|---|
+| `assets` | `(simulation_run_id, asset_id)` | Inventory per run, static attributes, provenance, `first/last_event_timestamp`, `updated_at` |
+| `telemetry_readings` | `event_id` | One row per event: 16 typed metric columns, `reading_status`, raw + normalized timestamp, `payload_sha256`, Kafka coordinates |
+| `anomaly_records` | `(anomaly_id, event_id)` | Simulator-injected labels only (`label_source='simulator_injected'`) |
+| `ingestion_batches`, `parquet_exports` | `batch_id`, `export_id` | Consumer batch audit and the Parquet export ledger |
+| `recommendation_analyses` | `analysis_id` | One workflow execution, status, full trace JSON |
+| `recommendations` | `recommendation_id`, unique `(run, asset, type, window_end)` | Validated recommendations (payload JSON) |
+| `recommendation_decisions` | `decision_id` | Append-only human decisions |
+| `alerts` | `alert_id`, unique `(run, asset, rule_id, window_end)` | WARNING/CRITICAL findings captured at analysis time |
 
-```bash
-uv run python db/init_db.py                                      # SQLite schema (idempotent)
-uv run python -m data_engineering.ingestion.load_source          # CSV -> source_records (idempotent)
-uv run python -m data_engineering.processing.filter_region       # NA subset -> table + data/processed CSV
-uv run python -m data_engineering.simulation.generate_telemetry  # store a synthetic 24 h run in SQLite
-uv run python -m data_engineering.validation.validate_dataset    # 20 checks -> data/processed/validation_report.md
+- **Timestamps.** UTC. SQLite stores fixed-width `YYYY-MM-DDTHH:MM:SS.ffffffZ` text, so text order equals
+  time order; PostgreSQL uses `TIMESTAMPTZ`.
+- **Latest reading.** `MAX(event_timestamp)` per asset among `reading_status='observed'` rows, joined back,
+  with same-timestamp duplicates collapsed to the most recently ingested row. "Latest" therefore skips
+  missing slots.
+- **Bounded history.** Every query takes `(run, asset, start, end]` plus a row cap
+  (`API_MAX_TELEMETRY_RANGE_HOURS`, `API_MAX_TELEMETRY_POINTS`).
+- **Layout ↔ telemetry.** The layout file maps `srv-NNN` → `SIM-NA-NNN`. Asset IDs are only unique within a
+  run, so the twin resolves them against one run (default: most recently updated).
+- **No cache, no materialized view, no retention job** exists. Current state is computed per request.
+
+ER diagram, indexes and their purpose: [docs/ARCHITECTURE.md §3](docs/ARCHITECTURE.md#3-database-and-data-model).
+
+---
+
+## 12. Dataset and data quality
+
+- **Source:** Kaggle [`deeplumiere/hyperscale-data-center-dataset`](https://www.kaggle.com/datasets/deeplumiere/hyperscale-data-center-dataset),
+  license reported as MIT by the Kaggle CLI. One CSV, 100,000 × 35, no empty cells, self-described
+  *engineered synthetic*.
+- **No timestamps, no equipment IDs.** Rows are independent records. `time_of_day` is a 3-value bucket.
+  So the project **simulates** time series. Each of 20 assets is seeded from one distinct NA row; every
+  metric is `baseline + slope × (driver − baseline) + AR(1) noise`, with slopes fitted on NA rows of the
+  same server type. Airflow is driven by fan speed; everything else, including inlet temperature, by
+  workload.
+- **Sampling:** 60 s slots, 1,440 per asset per day; 1 % of slots missing by default (explicit nulls).
+- **Units** are inferred from column names (`_c` °C, `_kw` kW, `_rpm`, `_cfm`, utilization %).
+- **Labels:** `failure_risk_level`, `energy_efficiency_class`, `maintenance_status` are static per asset
+  (copied from the baseline row). Injected anomalies: `thermal_rise`, `power_spike`,
+  `network_latency_spike`. There are **no airflow anomalies**, so the airflow rules have no ground truth.
+- **Pitfall:** region code `NA` becomes null under pandas' defaults; project code reads with the `csv` module.
+- **Leakage:** the simulator is deterministic per seed, so two runs with one seed replay identical series.
+  Training uses one run per seed.
+
+Good metrics on this data say nothing about real equipment: relationships are engineered (e.g. fan ↔
+airflow r = +0.995), the noise is stationary AR(1), and there are no control loops, no thermal inertia
+between servers and no failure physics. Details:
+[docs/ARCHITECTURE.md §4](docs/ARCHITECTURE.md#4-dataset-and-data-quality) and
+[docs/dataset/README.md](docs/dataset/README.md).
+
+---
+
+## 13. XGBoost model and forecasting
+
+- **Target:** inlet temperature change over h minutes, `inlet(t+h) − inlet(t)`, with one model per horizon
+  (h = 5 and 10). The prediction returned is `inlet(t) + Δ̂`.
+- **Features (45 in the active artifact):** 12 current values, inlet lags at 1/2/3/5/10/15 min looked up
+  **by timestamp**, rates of change, 5- and 15-min rolling mean/std/min/max of inlet, hour-of-day sin/cos,
+  and one-hot asset type and cooling type (categories from the training split only). Missing stays NaN.
+- **Split:** chronological on event time, 70/15/15, with purging of rows whose target crosses a boundary.
+  Never random: adjacent minutes are nearly identical, so a random split leaks the answer into training.
+- **Training:** native `xgb.train`, `eta 0.05`, `max_depth 5`, `hist`, early stopping on validation, seed 42.
+- **Artifacts:** `models/cooling_response/<version>/model_h{5,10}.ubj` + `metadata.json` (no pickle), atomic
+  `ACTIVE` pointer, loaded once at API startup, validated on load (schema version, XGBoost major version,
+  feature count).
+- **Measured result** (active artifact `crm-20261013T120438Z-1443761922fc8cc7`, test split, simulated data):
+
+| Horizon | Model MAE / RMSE (°C) | Persistence MAE / RMSE (°C) | RMSE skill |
+|---|---|---|---|
+| 5 min | 0.0390 / 0.0500 | 0.0383 / 0.0480 | −4.0 % |
+| 10 min | 0.0518 / 0.0656 | 0.0514 / 0.0647 | −1.4 % |
+
+  R² on levels is 0.995, but persistence scores the same, so it is meaningless here. R² of the predicted
+  change is −0.08 and −0.03.
+- **Forecast ≠ intervention model.** The model predicts what happens under the observed policy. Whether a
+  *different* fan speed would be safe is a causal question. The validity check finds 0 of 35 asset series
+  with a significant fan→inlet response, which matches the simulator's code. So the label is
+  `forecasting_baseline`, and hypothetical settings are never fed to it.
+
+Full detail: [docs/ML_AND_OPTIMIZATION.md](docs/ML_AND_OPTIMIZATION.md).
+
+---
+
+## 14. Cooling optimization and safety
+
+The implemented formulation (`cooling_model/optimizer.py`):
+
+```
+minimize    E_cooling(u)
+subject to  T̂_inlet(u, t + h) ≤ T_safe        for every trained horizon h
+            u_min ≤ u ≤ u_max                  (actuator bounds)
+            q_0.01 ≤ u ≤ q_0.99                (training support of u)
 ```
 
-**SQLite tables** (`db/schema.sql`):
+with `u` = `fan_speed_rpm`. The search is a grid at `search_step` or operator-supplied candidates. Ties prefer
+the current setting, then the smallest change. The optimizer **fails closed**. Each missing prerequisite is a
+named reason, and any one of the first, third or fourth blocks evaluation:
 
-| Table | Contents |
+| Reason | Why it blocks |
 |---|---|
-| `source_records` | every original row, all 35 columns, `provenance='dataset'` |
-| `region_filtered_records` (view `filtered_source_records`) | the NA subset |
-| `simulation_runs`, `asset_metadata` | runs and their synthetic assets |
-| `telemetry_readings` | the full 1,440-slot grid per asset; missing = `is_missing=1` + NULL metrics |
-| `anomaly_events`, `anomaly_labels` | injected anomalies, keeping both clean and injected values |
+| `RESPONSE_MODEL_NOT_VALIDATED` | Feeding a hypothetical fan speed into an observational forecaster is not a prediction of what that fan speed would do |
+| `ENERGY_OBJECTIVE_MISSING` | No measured cooling power exists; IT power is not a substitute |
+| `T_SAFE_NOT_CONFIGURED` | Safe limits must come from operators or equipment specifications; none are invented |
+| `ACTUATOR_BOUNDS_NOT_CONFIGURED` | Same, for actuator range and step |
 
-Simulation parameters and assumptions are documented in `config/simulation.yaml`.
+Even with all four resolved, the best result today is `CONSTRAINTS_ONLY` (feasible settings listed, none
+recommended), because no validated energy-response model exists. `optimizer.recommendation_only: false` is
+rejected by the config loader. Every response says
+`"actuation": "none: this system only recommends; it never sends commands to equipment"`.
 
-**Where things are stored**
+### Energy-waste screening (relative, no kW)
 
-| Path | Content | In git? |
+Without measured cooling power, the only defensible energy signal is **comparative**: is a server's fan
+running faster than comparable servers under comparable conditions? `energy/fan_peer.py` answers that.
+
+1. **Windows.** Split the lookback period (24 h) into 15-minute windows per asset. A window needs at
+   least 80 % observed readings.
+2. **Peers.** Compare only assets with the same `cooling_type` and `asset_type`. Liquid-cooled fans here
+   run about 40 % slower than air-cooled ones.
+3. **Matching.** Keep peer windows within ±0.10 `workload_intensity` and ±1 °C inlet of the asset's
+   latest window. At least 8 windows from at least 2 other assets are required; otherwise the result is
+   `INSUFFICIENT_PEERS`.
+4. **ELEVATED.** The asset is ELEVATED when its fan is ≥ 15 % above the peer median and above the
+   peers' 90th percentile.
+5. **Output.** `excess_fraction = fan/median − 1` and `relative_fan_power = (fan/median)³` (fan affinity
+   law, dimensionless, assumes the same fan model and system curve).
+
+All thresholds are analysis heuristics in `config/recommendations.yaml → energy_waste`.
+
+`ENERGY_WASTE` becomes `REQUIRES_REVIEW` when the asset is ELEVATED in at least 2 compared windows and
+has no thermal or airflow warnings. `estimated_energy_impact` stays null, and `relative_energy_indicator`
+carries the figures. The action is always to investigate (fan curve or firmware, sensor, airflow
+restriction, hardware). It is **never** to lower the fan, because the fan→inlet response is not
+validated.
+
+Measured on `sim-c9944cc35156` at 14:00:
+- **SIM-NA-016** (GPU, liquid): fan +18.4 % vs peers, affinity-law ratio 1.66, elevated in 4 of 5
+  compared windows.
+- **The other 19:** 5 within the peer range, 1 below, 13 not screenable.
+
+The same result appears in the copilot (energy questions) and the twin overlay `fan_excess`.
+
+Prerequisites before closed-loop control would be acceptable, with uncertainty handling and an
+experiment design: [docs/ML_AND_OPTIMIZATION.md §2](docs/ML_AND_OPTIMIZATION.md#2-cooling-optimization-and-safety).
+
+---
+
+## 15. LangGraph and multi-agent architecture
+
+```mermaid
+flowchart TD
+    S([START]) --> LT[load_telemetry<br/>all DB reads]
+    LT --> VT[validate_telemetry]
+    VT --> AS[assess_cooling_state<br/>evidence + rule candidates]
+    AS -->|telemetry OK/DEGRADED| PA[plan_analysis<br/>main LLM or 'all agents']
+    AS -->|INSUFFICIENT| AN
+    PA -->|planned ∪ required| TH[thermal_agent]
+    PA --> EN[energy_agent]
+    PA --> AN[anomaly_agent]
+    TH --> VE[validate_evidence]
+    EN --> VE
+    AN --> VE
+    VE -->|"invalid citations / disagreement,<br/>attempts ≤ max_reanalysis"| TH & AN
+    VE --> EC[evaluate_candidates<br/>deterministic validator]
+    EC --> RR[rank_recommendations]
+    RR --> GE[generate_explanation<br/>LLM, number-checked; template fallback]
+    GE --> PR[persist_recommendation]
+    PR --> E([END])
+```
+
+- **Deterministic:** all data reads, every number, rule candidates (an LLM can never create one), the
+  validator, uncertainty, ranking, IDs, persistence.
+- **Probabilistic (optional):** which specialists to run (the planner can only add to the agents required
+  by the rules), per-specialist interpretations with cited evidence IDs, and the explanation text.
+- **Guards:** LLM output schemas contain no numeric fields. Free text is number-checked against the
+  evidence. Execution claims ("was adjusted") are rejected. A failed LLM call makes the affected types
+  `INCONCLUSIVE` and the analysis `COMPLETED_WITH_FALLBACK`; it is never a silent success.
+- **Bounded:** each specialist runs at most `max_reanalysis_attempts + 1` (2) times. The explanation is
+  re-asked at most once. The energy agent calls an LLM only when there is energy evidence to interpret
+  (measured cooling power or a fan peer comparison result); otherwise it is deterministic.
+
+Details, state schema, the copilot graph and failure behaviour:
+[docs/AGENT_ARCHITECTURE.md](docs/AGENT_ARCHITECTURE.md).
+
+---
+
+## 16. Digital twin
+
+The backend joins a **demonstration** layout (1 facility → 1 room → 2 aisles → 4 racks → 20 servers, plus
+2 CRAH units with no telemetry; metres, x east / y up / z north) with live state from the store. Objects
+have stable IDs (`srv-013`); telemetry-linked objects carry `asset_id` (`SIM-NA-013`). The layout version is
+the revision plus a content hash, and the layout reloads when the file changes. State values are labelled
+`measured`, `calculated`, `aggregated` or `predicted`; freshness is `FRESH`/`STALE`/`NO_DATA`; restricted
+assets are `RESTRICTED`. Overlays: `temperature`, `predicted_temperature`, `workload`, `thermal_risk`,
+`energy` (server IT power), `fan_excess` (fan vs comparable peers, relative), `airflow` (magnitude only),
+`cooling_efficiency` (always `UNAVAILABLE`) and
+`data_quality`. Live updates come from one shared poller per process that diffs snapshots every 10 s and
+fans events out over SSE with per-client bounded queues and a `Last-Event-ID` replay buffer.
+
+This is a 3D *view* of telemetry and rule outputs, not a physical twin: no CFD, no airflow paths, no
+thermal coupling between objects, and illustrative coordinates. There is **no Three.js code** in the
+repository. Details: [docs/DIGITAL_TWIN.md](docs/DIGITAL_TWIN.md).
+
+---
+
+## 17. Natural-language operations copilot
+
+`POST /copilot/chat` runs a second LangGraph graph: `validate_input` (length; control requests get a
+refusal note) → `understand` (deterministic keyword/regex parser for intents, asset IDs from the scoped
+list, time windows; an optional LLM `QueryPlan` may add intents or resolve references, and its output is
+re-validated) → `clarify` (ambiguous asset, zone/rack/room words, comparisons without two assets) or
+`select_tools` → parallel `run_tool` (via LangGraph `Send`) → `validate_results` → `compose_answer`
+(LLM, number-checked and claim-checked, with deterministic fallback) → `remember`.
+
+The tools are predefined Python functions over **read-only** connections with statement timeouts, the
+operator's asset scope, and range and point caps: `latest`, `window_summary`, `trend_screen`, `energy`
+(IT power plus the fan peer comparison),
+`forecast`, `cooling_candidates`, `recommendations`, `maintenance_priority`, `specialists`. The LLM never
+sees SQL, credentials or raw tables, only up to 120 typed evidence items with IDs, which it must cite.
+"Last 2 hours" means simulated event time ending at the newest reading, and the response says so in
+`interpretation.time_basis`.
+
+Limitations: the keyword parser misses paraphrases; memory is in-process; evidence citations are checked
+for numbers but citation IDs in copilot answers are not verified one by one; prompt injection inside the
+question can at most change the wording (no tools, no writes). Details:
+[docs/AGENT_ARCHITECTURE.md §3](docs/AGENT_ARCHITECTURE.md#3-operations-copilot).
+
+---
+
+## 18. Reliability, security and observability
+
+| Area | Implemented | Not implemented / recommended |
 |---|---|---|
-| `data/raw/hyperscale-data-center-dataset/` | original Kaggle files + `MANIFEST.json` | no |
-| `data/datacenter_ops.db` | SQLite (override with `DATACENTER_OPS_DB_PATH`) | no |
-| `data/processed/` | NA subset CSV, validation report | no |
-| `data/simulation/<run_id>/` | stored-run CSV exports | no |
-| `data/telemetry_store.db` | consumer's telemetry store (SQLite, WAL) | no |
-| `data/telemetry/` | Parquet history (`region_code=…/event_date=…/part-….parquet`) | no |
-| `logs/phase1.jsonl` | structured JSON logs (all components: producer, consumer, exporter) | no |
-| Kafka topic data | inside the `dco-kafka` container | n/a |
+| Input validation | Pydantic with `extra="forbid"`, ID regexes, timezone-required datetimes, bounded lists and strings | — |
+| AuthN/AuthZ | Opt-in static bearer token (constant-time compare); asset scope enforced in every domain, copilot tools and SSE filtering | Per-user identity, roles, tenants, token rotation, auth for `EventSource` |
+| Secrets | `.env` gitignored; keys as `SecretStr`; URLs logged redacted; `/agents/status` reveals only whether a key exists | Secret manager |
+| Timeouts | PostgreSQL connect 3 s; statement timeout 10 s; LLM 60 s per call with 1 retry | Request-level deadline for `/recommendations/generate` |
+| Idempotency | `event_id` dedup; deterministic recommendation/alert IDs with unique constraints | Idempotency keys on decisions |
+| Transactions | One per consumer batch; one per `save_analysis` (analysis + recommendations + alerts) | — |
+| Logging | Structured JSON to stderr and `logs/phase1.jsonl`; one access line per request with `request_id` | Log rotation, central sink |
+| Request IDs | Accepted if well formed, else generated; echoed in `X-Request-ID` and every error body | Propagation into LLM traces |
+| Metrics / tracing | Per-node agent traces (latency, tokens, model, status) persisted in `trace_json` | Prometheus metrics, OpenTelemetry |
+| Health | `/health` (store reachable, schema version) | Readiness that includes the model and the provider |
+| Security headers | `nosniff`, `X-Frame-Options: DENY`, `no-referrer`, strict CSP and `no-store` on API paths | — |
+
+**Failure behaviour (verified in tests or code):**
+
+- **Database down:** startup still succeeds; requests return `503 database_unavailable`. The consumer
+  retries with backoff, then stops without committing offsets.
+- **Model missing or invalid:** `503 model_not_trained` / `model_artifact_invalid` on legacy routes, or
+  `status: UNAVAILABLE` with reasons on `/cooling/*`. Recommendations continue without a forecast; the
+  affected types become `INCONCLUSIVE`.
+- **Fireworks unavailable or invalid output:** the planner falls back to "run all agents"; a specialist is
+  marked `FAILED` and its types become `INCONCLUSIVE`; explanations fall back to the template; the copilot
+  returns its deterministic summary.
+- **Stale telemetry:** findings `DQ_STALE_ASSET` / `DQ_PIPELINE_STALE`; live analyses make every type except
+  `SENSOR_DATA_QUALITY` `INCONCLUSIVE`; the twin shows `STALE` and `thermal_status: UNKNOWN`.
+
+Full discussion and the prioritized gap analysis:
+[docs/PRODUCTION_READINESS.md](docs/PRODUCTION_READINESS.md).
+
+---
+
+## 19. Testing and evaluation
+
+```bash
+uv run pytest                                                   # unit + API + security tests; no broker, no LLM
+uv run pytest -m integration                                    # real Kafka round trip (docker compose up -d kafka)
+TELEMETRY_TEST_POSTGRES_URL=postgresql://dco:<pw>@127.0.0.1:55432/dco uv run pytest -m postgres
+uv run pytest tests/test_recommendations.py -q                  # one area
+```
+
+**Measured during this documentation pass (2026-10-13, Windows 11):** `uv run pytest` →
+**451 passed, 13 skipped, 2 deselected** in 66 s. The skips are PostgreSQL-marked tests without
+`TELEMETRY_TEST_POSTGRES_URL` plus one real-pandas check; the deselected tests are the 2 Kafka integration
+tests. Integration and PostgreSQL suites were **not** run in this pass.
+
+After the energy-waste screening was added (2026-10-13), the full suite including PostgreSQL and Kafka
+integration (`TELEMETRY_TEST_POSTGRES_URL=... uv run pytest -m ""`) gave **479 passed, 1 skipped**.
+
+LLMs are never called by tests: `tests/recommendation_helpers.ScriptedLLM` returns scripted structured
+outputs, including malformed ones and failures.
+
+| Area | Files |
+|---|---|
+| Pipeline, Kafka, store, Parquet, DuckDB | `test_ingestion.py`, `test_simulation.py`, `test_kafka_*.py`, `test_event_validation.py`, `test_consumer.py`, `test_telemetry_store.py`, `test_parquet_export.py`, `test_duckdb_queries.py`, `integration/` |
+| Estimator and API lifecycle | `test_cooling_metrics.py`, `test_cooling_estimator.py`, `telemetry/test_cooling_state_api.py`, `test_app_lifecycle.py`, `security/api/test_http_hardening.py` |
+| ML and optimizer | `test_cooling_model.py` (leakage, gaps, split/purge, validity both ways, artifacts, corruption), `test_cooling_optimizer.py`, `test_cooling_model_api.py` |
+| Agents, platform API, twin | `test_recommendations.py`, `test_platform_api.py`, `test_digital_twin.py` |
+| Energy-waste screening | `test_energy_waste.py` (peer method, type separation, workload matching, missing data, config validation, relative-only rule with thermal and persistence guards, endpoint, scope, copilot, twin overlay) |
+
+What has **not** been evaluated and how to evaluate it (agent correctness, recommendation validity,
+energy savings, latency and cost, twin consistency):
+[docs/PRODUCTION_READINESS.md §2](docs/PRODUCTION_READINESS.md#2-testing-and-evaluation).
+
+---
+
+## 20. Deployment and scaling
+
+**Current deployment:** local only. `docker-compose.yml` runs Kafka (and optionally PostgreSQL) bound to
+127.0.0.1; the producer, consumer and API run on the host with `uv run`. There is no Dockerfile for the
+API, no CI/CD and no infrastructure manifests.
+
+**Single-process assumptions in the current code:** the SSE broadcaster, its event IDs and replay buffer,
+the copilot memory and the training lock live in one API process. Running several Uvicorn workers would
+give each its own poller, counters and memory. A production design needs a shared event bus (Kafka or
+Redis Streams) and a shared conversation store first. The proposal (containers, PostgreSQL/TimescaleDB
+partitioning, a stream processor for current state, queue-based agent jobs, rate limiting, HA/DR, and how
+it changes for 100 facilities or sub-second telemetry) is in
+[docs/PRODUCTION_READINESS.md §3](docs/PRODUCTION_READINESS.md#3-deployment-and-scaling).
+
+---
+
+## 21. Performance and cost engineering
+
+Measured here only as single-request observations against the local SQLite store (46,539 readings): health
+~14 ms, cooling-state ~33 ms, forecast ~27 ms, dashboard overview ~147 ms, twin state ~120 ms. These are not
+benchmarks. Observed earlier in live LLM runs (recorded in the previous README): planner calls about 1–5 s,
+specialists about 8–18 s each, and one re-analysis that took 181 s, which is why transport retries now
+default to 1.
+
+Known hot spots in the code: `GET /recommendations` loads decisions per row (N+1); the
+`predicted_temperature` overlay runs one forecast per server sequentially; `latest_observed` uses an index
+on `(asset_id, event_timestamp)` that does not lead with `simulation_run_id`; the SSE snapshot recomputes
+all asset states every poll. The analysis and how to measure each improvement:
+[docs/PRODUCTION_READINESS.md §4](docs/PRODUCTION_READINESS.md#4-performance-and-cost-engineering).
+
+---
+
+## 22. Architectural decisions and trade-offs
+
+Twelve ADR-style records are in [docs/ARCHITECTURE.md §5](docs/ARCHITECTURE.md#5-architecture-decision-records):
+FastAPI, SQL vs NoSQL, XGBoost vs deep models, LangGraph vs a plain pipeline, multiple agents vs one LLM,
+SSE vs WebSockets, REST vs event-driven, polling vs streaming, 3D vs 2D, recommendation-only vs control,
+synthetic vs real data, and synchronous vs asynchronous processing. Each one separates design reasoning
+from measured evidence; most alternatives were **not** evaluated experimentally.

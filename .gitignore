@@ -3,6 +3,10 @@
 
 # ---- Data (Kaggle download, SQLite databases, Parquet history, simulation exports, reports) ----
 data/
+# Trained model artifacts ARE committed (models/cooling_response/, ~1.2 MB) so a fresh clone can serve
+# forecasts without retraining. Only half-written training output is ignored.
+models/**/.tmp-*/
+models/**/ACTIVE.tmp
 *.db
 *.db-journal
 *.db-wal
@@ -46,6 +50,9 @@ graphify-out/
 
 # ---- Claude Code: keep project skills, ignore personal settings ----
 .claude/settings.local.json
+
+# ---- Personal interview preparation (kept local, never committed) ----
+docs/INTERVIEW_GUIDE.md
 
 # ---- Editors / OS ----
 .vscode/

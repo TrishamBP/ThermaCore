@@ -8,6 +8,7 @@ Every value reaches the database as a bound parameter. Identifiers (table and co
 names) come only from the constants below, never from input.
 """
 
+import time
 import uuid
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
@@ -20,8 +21,9 @@ from data_engineering.paths import REPO_ROOT
 from data_engineering.simulation.generate_telemetry import METRICS
 from data_engineering.streaming.event_validation import ValidEvent
 
-SCHEMA_VERSION = 1
-SCHEMA_DESCRIPTION = "telemetry store v1: assets, telemetry_readings, anomaly_records, ingestion_batches, parquet_exports"
+SCHEMA_VERSION = 2
+SCHEMA_DESCRIPTION = ("telemetry store v2: assets, telemetry_readings, anomaly_records, ingestion_batches, "
+                      "parquet_exports; recommendation_analyses, recommendations, recommendation_decisions, alerts")
 
 READING_COLUMNS = (
     "event_id", "simulation_run_id", "asset_id", "data_center_id", "region", "region_code",
@@ -46,8 +48,17 @@ BATCH_COLUMNS = ("batch_id", "consumer_group", "source_topic", "started_at", "pe
                  "rows_conflicting", "anomaly_rows_inserted", "events_rejected", "offsets_json")
 TIMESTAMP_COLUMNS = frozenset({
     "event_timestamp", "ingested_at", "first_event_timestamp", "last_event_timestamp", "created_at",
-    "updated_at", "started_at", "persisted_at", "committed_at", "completed_at", "applied_at"})
-JSON_COLUMNS = frozenset({"offsets_json", "files_json", "affected_metrics_json"})
+    "updated_at", "started_at", "persisted_at", "committed_at", "completed_at", "applied_at",
+    "window_start", "window_end", "decided_at", "first_ts", "last_ts"})
+JSON_COLUMNS = frozenset({"offsets_json", "files_json", "affected_metrics_json", "trace_json", "payload_json"})
+ANALYSIS_COLUMNS = ("analysis_id", "simulation_run_id", "asset_id", "window_start", "window_end", "status",
+                    "trace_json", "created_at")
+RECOMMENDATION_COLUMNS = ("recommendation_id", "analysis_id", "simulation_run_id", "asset_id",
+                          "recommendation_type", "status", "severity", "window_start", "window_end", "payload_json",
+                          "created_at")
+ALERT_COLUMNS = ("alert_id", "analysis_id", "simulation_run_id", "asset_id", "rule_id", "severity", "window_start",
+                 "window_end", "payload_json", "created_at")
+DECISION_COLUMNS = ("decision_id", "recommendation_id", "decision", "reviewer", "note", "decided_at")
 _IN_CHUNK = 500
 
 
@@ -152,7 +163,11 @@ class SqlTelemetryStore(ABC):
     placeholder = "?"
     schema_file: Path
 
+    read_only = False
+    query_timeout_s: float | None = None
+
     def __init__(self) -> None:
+        self._deadline: float | None = None
         self.conn = self._connect()
 
     # ----- backend hooks -----
@@ -217,7 +232,11 @@ class SqlTelemetryStore(ABC):
     def _row(self, columns, record: dict) -> tuple:
         return tuple(self._param(c, record.get(c)) for c in columns)
 
+    def _arm_timeout(self) -> None:
+        self._deadline = time.monotonic() + self.query_timeout_s if self.query_timeout_s else None
+
     def _fetchall(self, sql: str, params=()) -> list[dict]:
+        self._arm_timeout()
         cur = self.conn.execute(self._sql(sql), params)
         names = [d[0] for d in cur.description]
         out = []
@@ -232,6 +251,7 @@ class SqlTelemetryStore(ABC):
         return out
 
     def _execute(self, sql: str, params=()):
+        self._arm_timeout()
         return self.conn.execute(self._sql(sql), params)
 
     def _executemany(self, sql: str, rows: list[tuple]) -> None:
@@ -465,9 +485,58 @@ class SqlTelemetryStore(ABC):
                               "LIMIT 1")
         return rows[0]["simulation_run_id"] if rows else None
 
+    def runs_summary(self) -> list[dict]:
+        """One row per simulation run: seed, asset count, event-time span (from the assets table)."""
+        return [dict(r, first_event=self._ts_out(r["first_event"]), last_event=self._ts_out(r["last_event"]))
+                for r in self._fetchall(
+                    "SELECT simulation_run_id, seed, COUNT(*) AS assets, MIN(first_event_timestamp) AS first_event, "
+                    "MAX(last_event_timestamp) AS last_event FROM assets GROUP BY simulation_run_id, seed "
+                    "ORDER BY simulation_run_id")]
+
+    def anomaly_event_times(self, simulation_run_id: str) -> list[dict]:
+        """(asset_id, event_timestamp) of every injected-anomaly label of a run (for evaluation segments)."""
+        return self._fetchall("SELECT DISTINCT asset_id, event_timestamp FROM anomaly_records "
+                              "WHERE simulation_run_id = ?", (simulation_run_id,))
+
     def run_assets(self, simulation_run_id: str) -> list[dict]:
         return self._fetchall("SELECT * FROM assets WHERE simulation_run_id = ? ORDER BY asset_id",
                               (simulation_run_id,))
+
+    def latest_observed(self, simulation_run_id: str, as_of: datetime | None = None,
+                        asset_id: str | None = None) -> list[dict]:
+        """Latest observed reading per asset (reading_status = 'observed') at or before as_of. One indexed
+        aggregate query plus the matching rows; same-timestamp duplicates are returned and collapsed by the caller."""
+        params: list = [simulation_run_id]
+        clause = ""
+        if as_of is not None:
+            clause += " AND event_timestamp <= ?"
+            params.append(self._ts_in(as_of))
+        if asset_id is not None:
+            clause += " AND asset_id = ?"
+            params.append(asset_id)
+        cols = ", ".join(f"r.{c}" for c in ("event_id", "asset_id", "event_timestamp", "ingested_at", "reading_status",
+                                             *METRICS))
+        return self._fetchall(
+            f"SELECT {cols} FROM telemetry_readings r JOIN (SELECT asset_id, MAX(event_timestamp) AS ts "
+            f"FROM telemetry_readings WHERE simulation_run_id = ? AND reading_status = 'observed'{clause} "
+            "GROUP BY asset_id) m ON r.asset_id = m.asset_id AND r.event_timestamp = m.ts "
+            "WHERE r.simulation_run_id = ? AND r.reading_status = 'observed' ORDER BY r.asset_id, r.ingested_at",
+            (*params, simulation_run_id))
+
+    def run_readings_window(self, simulation_run_id: str, start: datetime, end: datetime, limit: int) -> list[dict]:
+        """All assets of one run with start < event_timestamp <= end, at most `limit` rows."""
+        cols = ", ".join(("event_id", "asset_id", "event_timestamp", "ingested_at", "reading_status", *METRICS))
+        return self._fetchall(
+            f"SELECT {cols} FROM telemetry_readings WHERE simulation_run_id = ? AND event_timestamp > ? "
+            "AND event_timestamp <= ? ORDER BY asset_id, event_timestamp, ingested_at LIMIT ?",
+            (simulation_run_id, self._ts_in(start), self._ts_in(end), int(limit)))
+
+    def anomaly_labels_between(self, simulation_run_id: str, start: datetime, end: datetime) -> list[dict]:
+        return self._fetchall(
+            "SELECT asset_id, anomaly_type, COUNT(*) AS readings, MIN(event_timestamp) AS first_ts, "
+            "MAX(event_timestamp) AS last_ts FROM anomaly_records WHERE simulation_run_id = ? AND event_timestamp > ? "
+            "AND event_timestamp <= ? GROUP BY asset_id, anomaly_type ORDER BY asset_id, anomaly_type",
+            (simulation_run_id, self._ts_in(start), self._ts_in(end)))
 
     def readings_window(self, simulation_run_id: str, asset_id: str, start: datetime, end: datetime) -> list[dict]:
         """Readings of one asset of one run with start < event_timestamp <= end (index: asset_id, event_timestamp)."""
@@ -476,6 +545,87 @@ class SqlTelemetryStore(ABC):
             f"SELECT {cols} FROM telemetry_readings WHERE asset_id = ? AND simulation_run_id = ? "
             "AND event_timestamp > ? AND event_timestamp <= ? ORDER BY event_timestamp, ingested_at, event_id",
             (asset_id, simulation_run_id, self._ts_in(start), self._ts_in(end)))
+
+    # ----- recommendation analyses (schema v2) -----
+    def save_analysis(self, analysis: dict, recommendations: list[dict], alerts: list[dict] = ()) -> list[str]:
+        """Insert an analysis and its recommendations in one transaction. A recommendation whose
+        (run, asset, type, window_end) already exists is not inserted again; returns the ids of
+        those already-existing recommendations."""
+        existing = []
+        with self.transaction():
+            self._execute(self._insert_sql("recommendation_analyses", ANALYSIS_COLUMNS),
+                          self._row(ANALYSIS_COLUMNS, analysis))
+            for rec in recommendations:
+                cur = self._execute(self._insert_sql("recommendations", RECOMMENDATION_COLUMNS,
+                                                     "(simulation_run_id, asset_id, recommendation_type, window_end) "
+                                                     "DO NOTHING"), self._row(RECOMMENDATION_COLUMNS, rec))
+                if cur.rowcount != 1:
+                    existing.append(rec["recommendation_id"])
+            for alert in alerts:
+                self._execute(self._insert_sql("alerts", ALERT_COLUMNS,
+                                               "(simulation_run_id, asset_id, rule_id, window_end) DO NOTHING"),
+                              self._row(ALERT_COLUMNS, alert))
+        return existing
+
+    def get_analysis(self, analysis_id: str) -> dict | None:
+        rows = self._fetchall("SELECT * FROM recommendation_analyses WHERE analysis_id = ?", (analysis_id,))
+        return rows[0] if rows else None
+
+    def _filtered(self, table: str, id_column: str, filters: dict, start: datetime | None, end: datetime | None,
+                  cursor: tuple | None, limit: int) -> list[dict]:
+        """Newest first by (created_at, id); keyset pagination: cursor = (created_at, id) of the last row seen.
+        start/end filter the observation window end (window_end). Column names come from constants only."""
+        clauses, params = [], []
+        for column, value in filters.items():
+            if value is not None:
+                clauses.append(f"{column} = ?")
+                params.append(value)
+        if start is not None:
+            clauses.append("window_end >= ?")
+            params.append(self._ts_in(start))
+        if end is not None:
+            clauses.append("window_end <= ?")
+            params.append(self._ts_in(end))
+        if cursor is not None:
+            clauses.append(f"(created_at < ? OR (created_at = ? AND {id_column} > ?))")
+            ts = self._ts_in(cursor[0])
+            params += [ts, ts, cursor[1]]
+        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+        return self._fetchall(f"SELECT * FROM {table}{where} ORDER BY created_at DESC, {id_column} LIMIT ?",
+                              (*params, int(limit)))
+
+    def list_recommendations(self, *, simulation_run_id: str | None = None, asset_id: str | None = None,
+                             recommendation_type: str | None = None, status: str | None = None,
+                             severity: str | None = None, start: datetime | None = None, end: datetime | None = None,
+                             cursor: tuple | None = None, limit: int = 50) -> list[dict]:
+        return self._filtered("recommendations", "recommendation_id",
+                              {"simulation_run_id": simulation_run_id, "asset_id": asset_id,
+                               "recommendation_type": recommendation_type, "status": status, "severity": severity},
+                              start, end, cursor, limit)
+
+    def list_alerts(self, *, simulation_run_id: str | None = None, asset_id: str | None = None,
+                    rule_id: str | None = None, severity: str | None = None, start: datetime | None = None,
+                    end: datetime | None = None, cursor: tuple | None = None, limit: int = 50) -> list[dict]:
+        return self._filtered("alerts", "alert_id", {"simulation_run_id": simulation_run_id, "asset_id": asset_id,
+                                                     "rule_id": rule_id, "severity": severity},
+                              start, end, cursor, limit)
+
+    def get_alert(self, alert_id: str) -> dict | None:
+        rows = self._fetchall("SELECT * FROM alerts WHERE alert_id = ?", (alert_id,))
+        return rows[0] if rows else None
+
+    def get_recommendation(self, recommendation_id: str) -> dict | None:
+        rows = self._fetchall("SELECT * FROM recommendations WHERE recommendation_id = ?", (recommendation_id,))
+        return rows[0] if rows else None
+
+    def add_decision(self, decision: dict) -> None:
+        with self.transaction():
+            self._execute(self._insert_sql("recommendation_decisions", DECISION_COLUMNS),
+                          self._row(DECISION_COLUMNS, decision))
+
+    def decisions(self, recommendation_id: str) -> list[dict]:
+        return self._fetchall("SELECT * FROM recommendation_decisions WHERE recommendation_id = ? "
+                              "ORDER BY decided_at, decision_id", (recommendation_id,))
 
     def counts(self) -> dict[str, int]:
         tables = ("assets", "telemetry_readings", "anomaly_records", "ingestion_batches", "parquet_exports")
@@ -497,7 +647,8 @@ class SqlTelemetryStore(ABC):
 
 
 def open_store(settings, *, search_path: str | None = None, connect_timeout_s: int = 10,
-               sqlite_check_same_thread: bool = True) -> SqlTelemetryStore:
+               sqlite_check_same_thread: bool = True, read_only: bool = False,
+               query_timeout_s: float | None = None) -> SqlTelemetryStore:
     """Build the store selected by TELEMETRY_DB_BACKEND (does not initialize the schema).
 
     connect_timeout_s applies to PostgreSQL (SQLite opens a local file); sqlite_check_same_thread see
@@ -506,9 +657,11 @@ def open_store(settings, *, search_path: str | None = None, connect_timeout_s: i
     if settings.db_backend == "sqlite":
         from data_engineering.storage.sqlite_store import SqliteTelemetryStore
         return SqliteTelemetryStore(settings.resolve_path(settings.sqlite_path),
-                                    check_same_thread=sqlite_check_same_thread)
+                                    check_same_thread=sqlite_check_same_thread, read_only=read_only,
+                                    query_timeout_s=query_timeout_s)
     from data_engineering.storage.postgres_store import PostgresTelemetryStore
-    return PostgresTelemetryStore(settings.postgres_url, search_path=search_path, connect_timeout_s=connect_timeout_s)
+    return PostgresTelemetryStore(settings.postgres_url, search_path=search_path, connect_timeout_s=connect_timeout_s,
+                                  read_only=read_only, query_timeout_s=query_timeout_s)
 
 
 SCHEMA_DIR = REPO_ROOT / "db"

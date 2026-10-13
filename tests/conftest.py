@@ -164,15 +164,25 @@ def anyio_backend():
     return "asyncio"
 
 
-def make_api_app(store_path=None, *, store_settings=None, cooling_config=None, **app_settings):
+def make_api_app(store_path=None, *, store_settings=None, cooling_config=None, cooling_model_settings=None,
+                 llms=(None, None), layout_provider=None, **app_settings):
     """create_app() wired to a test store; nothing is read from the real .env for the database."""
     from app.config import AppSettings
     from app.main import create_app
     from cooling_helpers import all_limits_config
     from data_engineering.streaming.settings import load_consumer_settings
     store_settings = store_settings or load_consumer_settings(env={"TELEMETRY_SQLITE_PATH": str(store_path)})
+    if cooling_model_settings is None:      # never the real models/ directory: no model unless a test trains one
+        import dataclasses
+        from pathlib import Path
+        from data_engineering.cooling_model.config import load_settings
+        base = load_settings()
+        empty = Path(store_settings.sqlite_path).parent / "no_models"
+        cooling_model_settings = dataclasses.replace(base, model=dataclasses.replace(base.model, artifact_dir=empty))
     return create_app(AppSettings(environment="test", **app_settings), store_settings=store_settings,
-                      cooling_config=cooling_config or all_limits_config())
+                      cooling_config=cooling_config or all_limits_config(),
+                      cooling_model_settings=cooling_model_settings, llms=llms,  # no real LLM calls in tests
+                      layout_provider=layout_provider)
 
 
 @pytest.fixture

@@ -1,0 +1,49 @@
+# DEMONSTRATION LAYOUT for the 3D digital twin (hackathon). NOT a verified physical facility.
+# The telemetry has no room/aisle/rack topology: rack membership, coordinates and dimensions below
+# are illustrative. Server objects map to the simulator's asset ids (SIM-NA-001..020).
+# Units: metres; position = object centre in room coordinates (x east, y up, z north).
+# Override the file with DIGITAL_TWIN_LAYOUT=<path>.
+
+layout:
+  revision: demo-1
+  demonstration: true
+  units: m
+
+# Colour/status bands for overlays: visual thresholds only, NOT equipment safety limits.
+overlay_bands:
+  temperature: [{max: 21.0, status: cool}, {max: 24.0, status: normal}, {max: 26.0, status: warm}, {max: null, status: hot}]
+  workload: [{max: 0.3, status: low}, {max: 0.7, status: medium}, {max: null, status: high}]
+  airflow: [{max: 150.0, status: low}, {max: 220.0, status: medium}, {max: null, status: high}]
+  energy: [{max: 100.0, status: low}, {max: 200.0, status: medium}, {max: null, status: high}]
+
+objects:
+  - {id: dc-na-1, type: facility, name: Demo data center (North America), position: [0, 0, 0], dimensions: [24, 4, 14]}
+  - {id: room-1, parent_id: dc-na-1, type: room, name: Data hall 1, position: [0, 2, 0], dimensions: [20, 4, 12]}
+  - {id: aisle-1, parent_id: room-1, type: aisle, name: Aisle 1, position: [0, 0.01, -2.5], dimensions: [14, 0.02, 1.2]}
+  - {id: rack-11, parent_id: aisle-1, type: rack, name: Rack 1A, position: [-3, 1.0, -1.3], dimensions: [0.6, 2.0, 1.2]}
+  - {id: srv-001, parent_id: rack-11, type: server, asset_id: SIM-NA-001, name: Server SIM-NA-001, position: [-3, 0.3, -1.3], dimensions: [0.48, 0.089, 1.0]}
+  - {id: srv-002, parent_id: rack-11, type: server, asset_id: SIM-NA-002, name: Server SIM-NA-002, position: [-3, 0.65, -1.3], dimensions: [0.48, 0.089, 1.0]}
+  - {id: srv-003, parent_id: rack-11, type: server, asset_id: SIM-NA-003, name: Server SIM-NA-003, position: [-3, 1.0, -1.3], dimensions: [0.48, 0.089, 1.0]}
+  - {id: srv-004, parent_id: rack-11, type: server, asset_id: SIM-NA-004, name: Server SIM-NA-004, position: [-3, 1.35, -1.3], dimensions: [0.48, 0.089, 1.0]}
+  - {id: srv-005, parent_id: rack-11, type: server, asset_id: SIM-NA-005, name: Server SIM-NA-005, position: [-3, 1.7, -1.3], dimensions: [0.48, 0.089, 1.0]}
+  - {id: rack-12, parent_id: aisle-1, type: rack, name: Rack 1B, position: [3, 1.0, -1.3], dimensions: [0.6, 2.0, 1.2]}
+  - {id: srv-006, parent_id: rack-12, type: server, asset_id: SIM-NA-006, name: Server SIM-NA-006, position: [3, 0.3, -1.3], dimensions: [0.48, 0.089, 1.0]}
+  - {id: srv-007, parent_id: rack-12, type: server, asset_id: SIM-NA-007, name: Server SIM-NA-007, position: [3, 0.65, -1.3], dimensions: [0.48, 0.089, 1.0]}
+  - {id: srv-008, parent_id: rack-12, type: server, asset_id: SIM-NA-008, name: Server SIM-NA-008, position: [3, 1.0, -1.3], dimensions: [0.48, 0.089, 1.0]}
+  - {id: srv-009, parent_id: rack-12, type: server, asset_id: SIM-NA-009, name: Server SIM-NA-009, position: [3, 1.35, -1.3], dimensions: [0.48, 0.089, 1.0]}
+  - {id: srv-010, parent_id: rack-12, type: server, asset_id: SIM-NA-010, name: Server SIM-NA-010, position: [3, 1.7, -1.3], dimensions: [0.48, 0.089, 1.0]}
+  - {id: aisle-2, parent_id: room-1, type: aisle, name: Aisle 2, position: [0, 0.01, 2.5], dimensions: [14, 0.02, 1.2]}
+  - {id: rack-21, parent_id: aisle-2, type: rack, name: Rack 2A, position: [-3, 1.0, 3.7], dimensions: [0.6, 2.0, 1.2]}
+  - {id: srv-011, parent_id: rack-21, type: server, asset_id: SIM-NA-011, name: Server SIM-NA-011, position: [-3, 0.3, 3.7], dimensions: [0.48, 0.089, 1.0]}
+  - {id: srv-012, parent_id: rack-21, type: server, asset_id: SIM-NA-012, name: Server SIM-NA-012, position: [-3, 0.65, 3.7], dimensions: [0.48, 0.089, 1.0]}
+  - {id: srv-013, parent_id: rack-21, type: server, asset_id: SIM-NA-013, name: Server SIM-NA-013, position: [-3, 1.0, 3.7], dimensions: [0.48, 0.089, 1.0]}
+  - {id: srv-014, parent_id: rack-21, type: server, asset_id: SIM-NA-014, name: Server SIM-NA-014, position: [-3, 1.35, 3.7], dimensions: [0.48, 0.089, 1.0]}
+  - {id: srv-015, parent_id: rack-21, type: server, asset_id: SIM-NA-015, name: Server SIM-NA-015, position: [-3, 1.7, 3.7], dimensions: [0.48, 0.089, 1.0]}
+  - {id: rack-22, parent_id: aisle-2, type: rack, name: Rack 2B, position: [3, 1.0, 3.7], dimensions: [0.6, 2.0, 1.2]}
+  - {id: srv-016, parent_id: rack-22, type: server, asset_id: SIM-NA-016, name: Server SIM-NA-016, position: [3, 0.3, 3.7], dimensions: [0.48, 0.089, 1.0]}
+  - {id: srv-017, parent_id: rack-22, type: server, asset_id: SIM-NA-017, name: Server SIM-NA-017, position: [3, 0.65, 3.7], dimensions: [0.48, 0.089, 1.0]}
+  - {id: srv-018, parent_id: rack-22, type: server, asset_id: SIM-NA-018, name: Server SIM-NA-018, position: [3, 1.0, 3.7], dimensions: [0.48, 0.089, 1.0]}
+  - {id: srv-019, parent_id: rack-22, type: server, asset_id: SIM-NA-019, name: Server SIM-NA-019, position: [3, 1.35, 3.7], dimensions: [0.48, 0.089, 1.0]}
+  - {id: srv-020, parent_id: rack-22, type: server, asset_id: SIM-NA-020, name: Server SIM-NA-020, position: [3, 1.7, 3.7], dimensions: [0.48, 0.089, 1.0]}
+  - {id: crah-1, parent_id: room-1, type: cooling_unit, name: CRAH 1 (no telemetry), position: [-9, 1.0, 0], dimensions: [1.0, 2.0, 2.5], metadata: {note: cooling equipment is drawn for context; there is no cooling-unit telemetry}}
+  - {id: crah-2, parent_id: room-1, type: cooling_unit, name: CRAH 2 (no telemetry), position: [9, 1.0, 0], dimensions: [1.0, 2.0, 2.5], metadata: {note: cooling equipment is drawn for context; there is no cooling-unit telemetry}}

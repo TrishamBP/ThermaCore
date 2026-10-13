@@ -1,0 +1,1686 @@
+{
+  "artifact_schema_version": 1,
+  "version": "crm-20261013T115628Z-1443761922fc8cc7",
+  "created_at": "2026-10-13T11:56:28.334930+00:00",
+  "model_label": "forecasting_baseline",
+  "target": "inlet_temperature_c(t+h) - inlet_temperature_c(t), deg C",
+  "horizons_minutes": [
+    5,
+    10
+  ],
+  "feature_names": [
+    "inlet_temperature_c",
+    "exhaust_temperature_c",
+    "temperature_delta_c",
+    "workload_intensity",
+    "cpu_utilization",
+    "gpu_utilization",
+    "memory_utilization",
+    "storage_utilization",
+    "fan_speed_rpm",
+    "airflow_cfm",
+    "power_consumption_kw",
+    "pue",
+    "inlet_temperature_c_lag_1m",
+    "inlet_temperature_c_lag_2m",
+    "inlet_temperature_c_lag_3m",
+    "inlet_temperature_c_lag_5m",
+    "inlet_temperature_c_lag_10m",
+    "inlet_temperature_c_lag_15m",
+    "inlet_temperature_c_rate_1m",
+    "inlet_temperature_c_rate_5m",
+    "inlet_temperature_c_rate_15m",
+    "temperature_delta_c_rate_5m",
+    "workload_intensity_rate_5m",
+    "cpu_utilization_rate_5m",
+    "fan_speed_rpm_rate_1m",
+    "fan_speed_rpm_rate_5m",
+    "airflow_cfm_rate_5m",
+    "power_consumption_kw_rate_5m",
+    "inlet_temperature_c_mean_5m",
+    "inlet_temperature_c_std_5m",
+    "inlet_temperature_c_min_5m",
+    "inlet_temperature_c_max_5m",
+    "inlet_temperature_c_mean_15m",
+    "inlet_temperature_c_std_15m",
+    "inlet_temperature_c_min_15m",
+    "inlet_temperature_c_max_15m",
+    "hour_sin",
+    "hour_cos",
+    "asset_type=Compute",
+    "asset_type=Edge",
+    "asset_type=GPU",
+    "asset_type=Storage",
+    "cooling_type=Air",
+    "cooling_type=Hybrid",
+    "cooling_type=Liquid"
+  ],
+  "feature_config": {
+    "current": [
+      "inlet_temperature_c",
+      "exhaust_temperature_c",
+      "temperature_delta_c",
+      "workload_intensity",
+      "cpu_utilization",
+      "gpu_utilization",
+      "memory_utilization",
+      "storage_utilization",
+      "fan_speed_rpm",
+      "airflow_cfm",
+      "power_consumption_kw",
+      "pue"
+    ],
+    "lags_minutes": {
+      "inlet_temperature_c": [
+        1,
+        2,
+        3,
+        5,
+        10,
+        15
+      ]
+    },
+    "rates_minutes": {
+      "inlet_temperature_c": [
+        1,
+        5,
+        15
+      ],
+      "temperature_delta_c": [
+        5
+      ],
+      "workload_intensity": [
+        5
+      ],
+      "cpu_utilization": [
+        5
+      ],
+      "fan_speed_rpm": [
+        1,
+        5
+      ],
+      "airflow_cfm": [
+        5
+      ],
+      "power_consumption_kw": [
+        5
+      ]
+    },
+    "rolling_minutes": {
+      "inlet_temperature_c": [
+        5,
+        15
+      ]
+    },
+    "time_of_day": true,
+    "categorical": [
+      "asset_type",
+      "cooling_type"
+    ]
+  },
+  "categories": {
+    "asset_type": [
+      "Compute",
+      "Edge",
+      "GPU",
+      "Storage"
+    ],
+    "cooling_type": [
+      "Air",
+      "Hybrid",
+      "Liquid"
+    ]
+  },
+  "feature_ranges": {
+    "inlet_temperature_c": {
+      "min": 19.617,
+      "max": 24.829,
+      "q_low": 19.745,
+      "q_high": 22.71891
+    },
+    "exhaust_temperature_c": {
+      "min": 20.769,
+      "max": 59.425,
+      "q_low": 21.803,
+      "q_high": 57.75282
+    },
+    "temperature_delta_c": {
+      "min": 0.4469999999999992,
+      "max": 39.541,
+      "q_low": 1.4210900000000029,
+      "q_high": 37.84164
+    },
+    "workload_intensity": {
+      "min": 0.1,
+      "max": 1.0,
+      "q_low": 0.1,
+      "q_high": 1.0
+    },
+    "cpu_utilization": {
+      "min": 7.551,
+      "max": 87.502,
+      "q_low": 8.710450000000002,
+      "q_high": 80.95682
+    },
+    "gpu_utilization": {
+      "min": 13.068,
+      "max": 72.729,
+      "q_low": 16.13764,
+      "q_high": 71.28303
+    },
+    "memory_utilization": {
+      "min": 13.718,
+      "max": 82.641,
+      "q_low": 16.52745,
+      "q_high": 77.38455
+    },
+    "storage_utilization": {
+      "min": 10.002,
+      "max": 94.74,
+      "q_low": 10.62609,
+      "q_high": 93.029
+    },
+    "fan_speed_rpm": {
+      "min": 1500.0,
+      "max": 4402.731,
+      "q_low": 1500.0,
+      "q_high": 3996.5402799999997
+    },
+    "airflow_cfm": {
+      "min": 82.816,
+      "max": 267.574,
+      "q_low": 83.84509,
+      "q_high": 243.42991
+    },
+    "power_consumption_kw": {
+      "min": 20.135,
+      "max": 448.364,
+      "q_low": 21.201690000000003,
+      "q_high": 314.47446
+    },
+    "pue": {
+      "min": 1.05,
+      "max": 1.17,
+      "q_low": 1.05,
+      "q_high": 1.163
+    },
+    "inlet_temperature_c_lag_1m": {
+      "min": 19.617,
+      "max": 24.829,
+      "q_low": 19.745,
+      "q_high": 22.719
+    },
+    "inlet_temperature_c_lag_2m": {
+      "min": 19.617,
+      "max": 24.829,
+      "q_low": 19.745,
+      "q_high": 22.719
+    },
+    "inlet_temperature_c_lag_3m": {
+      "min": 19.617,
+      "max": 24.829,
+      "q_low": 19.745,
+      "q_high": 22.71902
+    },
+    "inlet_temperature_c_lag_5m": {
+      "min": 19.617,
+      "max": 24.829,
+      "q_low": 19.745,
+      "q_high": 22.719759999999997
+    },
+    "inlet_temperature_c_lag_10m": {
+      "min": 19.617,
+      "max": 24.829,
+      "q_low": 19.745,
+      "q_high": 22.71858
+    },
+    "inlet_temperature_c_lag_15m": {
+      "min": 19.617,
+      "max": 24.829,
+      "q_low": 19.745,
+      "q_high": 22.713
+    },
+    "inlet_temperature_c_rate_1m": {
+      "min": -2.690999999999999,
+      "max": 0.42600000000000193,
+      "q_low": -0.05000000000000071,
+      "q_high": 0.05372000000000031
+    },
+    "inlet_temperature_c_rate_5m": {
+      "min": -0.5474000000000003,
+      "max": 0.3957999999999998,
+      "q_low": -0.022800000000000153,
+      "q_high": 0.024399999999999977
+    },
+    "inlet_temperature_c_rate_15m": {
+      "min": -0.1904000000000001,
+      "max": 0.18353333333333335,
+      "q_low": -0.01319999999999998,
+      "q_high": 0.013866666666666753
+    },
+    "temperature_delta_c_rate_5m": {
+      "min": -2.7846,
+      "max": 1.6372,
+      "q_low": -0.11800000000000013,
+      "q_high": 0.12824600000000033
+    },
+    "workload_intensity_rate_5m": {
+      "min": -0.017400000000000016,
+      "max": 0.016200000000000003,
+      "q_low": -0.007599999999999996,
+      "q_high": 0.007999999999999997
+    },
+    "cpu_utilization_rate_5m": {
+      "min": -1.2586000000000013,
+      "max": 1.1268,
+      "q_low": -0.5405839999999996,
+      "q_high": 0.5664139999999989
+    },
+    "fan_speed_rpm_rate_1m": {
+      "min": -84.98300000000017,
+      "max": 94.04199999999992,
+      "q_low": -41.067240000000176,
+      "q_high": 40.47696000000011
+    },
+    "fan_speed_rpm_rate_5m": {
+      "min": -39.21900000000001,
+      "max": 43.30060000000003,
+      "q_low": -17.57271400000004,
+      "q_high": 18.023020000000013
+    },
+    "airflow_cfm_rate_5m": {
+      "min": -2.325999999999999,
+      "max": 2.634000000000003,
+      "q_low": -1.0645379999999969,
+      "q_high": 1.085492000000003
+    },
+    "power_consumption_kw_rate_5m": {
+      "min": -46.7432,
+      "max": 47.175799999999995,
+      "q_low": -1.0634440000000047,
+      "q_high": 1.1168919999999996
+    },
+    "inlet_temperature_c_mean_5m": {
+      "min": 19.637,
+      "max": 24.82,
+      "q_low": 19.746318000000002,
+      "q_high": 22.710928
+    },
+    "inlet_temperature_c_std_5m": {
+      "min": 0.0,
+      "max": 1.3495178768730705,
+      "q_low": 0.004195235392679836,
+      "q_high": 0.0471563173239442
+    },
+    "inlet_temperature_c_min_5m": {
+      "min": 19.617,
+      "max": 24.802,
+      "q_low": 19.722,
+      "q_high": 22.673
+    },
+    "inlet_temperature_c_max_5m": {
+      "min": 19.655,
+      "max": 24.829,
+      "q_low": 19.77059,
+      "q_high": 22.77141
+    },
+    "inlet_temperature_c_mean_15m": {
+      "min": 19.668466666666667,
+      "max": 24.80633333333334,
+      "q_low": 19.752000000000006,
+      "q_high": 22.696175999999998
+    },
+    "inlet_temperature_c_std_15m": {
+      "min": 0.0,
+      "max": 1.357430460127381,
+      "q_low": 0.01137570835990841,
+      "q_high": 0.39060298003104965
+    },
+    "inlet_temperature_c_min_15m": {
+      "min": 19.617,
+      "max": 24.768,
+      "q_low": 19.696,
+      "q_high": 22.583
+    },
+    "inlet_temperature_c_max_15m": {
+      "min": 19.697,
+      "max": 24.829,
+      "q_low": 19.801,
+      "q_high": 23.091
+    },
+    "hour_sin": {
+      "min": -0.9351352096860117,
+      "max": 1.0,
+      "q_low": -0.9170600743851238,
+      "q_high": 0.9997620270799091
+    },
+    "hour_cos": {
+      "min": -1.0,
+      "max": 1.0,
+      "q_low": -0.9996573249755573,
+      "q_high": 0.9993908270190958
+    },
+    "asset_type=Compute": {
+      "min": 0.0,
+      "max": 1.0,
+      "q_low": 0.0,
+      "q_high": 1.0
+    },
+    "asset_type=Edge": {
+      "min": 0.0,
+      "max": 1.0,
+      "q_low": 0.0,
+      "q_high": 1.0
+    },
+    "asset_type=GPU": {
+      "min": 0.0,
+      "max": 1.0,
+      "q_low": 0.0,
+      "q_high": 1.0
+    },
+    "asset_type=Storage": {
+      "min": 0.0,
+      "max": 1.0,
+      "q_low": 0.0,
+      "q_high": 1.0
+    },
+    "cooling_type=Air": {
+      "min": 0.0,
+      "max": 1.0,
+      "q_low": 0.0,
+      "q_high": 1.0
+    },
+    "cooling_type=Hybrid": {
+      "min": 0.0,
+      "max": 1.0,
+      "q_low": 0.0,
+      "q_high": 1.0
+    },
+    "cooling_type=Liquid": {
+      "min": 0.0,
+      "max": 1.0,
+      "q_low": 0.0,
+      "q_high": 1.0
+    }
+  },
+  "xgboost_params": {
+    "objective": "reg:squarederror",
+    "eta": 0.05,
+    "max_depth": 5,
+    "subsample": 0.8,
+    "colsample_bytree": 0.8,
+    "min_child_weight": 5,
+    "lambda": 1.0,
+    "tree_method": "hist",
+    "seed": 42,
+    "nthread": 4,
+    "num_boost_round": 800,
+    "early_stopping_rounds": 50
+  },
+  "xgboost_version": "3.4.1",
+  "training_data": {
+    "runs_used": [
+      {
+        "run_id": "sim-c9944cc35156",
+        "seed": 42,
+        "assets": 20,
+        "minutes": 1440.0
+      },
+      {
+        "run_id": "sim-db28de0560f5",
+        "seed": 7,
+        "assets": 5,
+        "minutes": 600.0
+      },
+      {
+        "run_id": "sim-037f565f10e4",
+        "seed": 8,
+        "assets": 2,
+        "minutes": 60.0
+      },
+      {
+        "run_id": "sim-b85066662da9",
+        "seed": 99,
+        "assets": 10,
+        "minutes": 1440.0
+      }
+    ],
+    "runs_skipped": [
+      {
+        "run_id": "sim-0531de355e95",
+        "seed": 42,
+        "assets": 2,
+        "minutes": 14.0,
+        "reason": "shorter than 60 minutes"
+      },
+      {
+        "run_id": "sim-07920cc116e9",
+        "seed": 21,
+        "assets": 5,
+        "minutes": 25.0,
+        "reason": "shorter than 60 minutes"
+      },
+      {
+        "run_id": "sim-12b37278e5e8",
+        "seed": 42,
+        "assets": 2,
+        "minutes": 3.0,
+        "reason": "shorter than 60 minutes"
+      },
+      {
+        "run_id": "sim-430a4e0441b3",
+        "seed": 9,
+        "assets": 2,
+        "minutes": 30.0,
+        "reason": "shorter than 60 minutes"
+      }
+    ],
+    "series": 37,
+    "rows": 46320,
+    "fingerprint": "14437619aba2433f",
+    "split": {
+      "train_end": "2026-01-01T16:47:18+00:00",
+      "validation_end": "2026-01-01T20:23:09+00:00",
+      "purged_rows": 600
+    },
+    "rows_per_horizon": {
+      "5": {
+        "train": 32327,
+        "validation": 6060,
+        "test": 6199
+      },
+      "10": {
+        "train": 32297,
+        "validation": 6063,
+        "test": 6051
+      }
+    },
+    "source_type": "simulated"
+  },
+  "evaluation": {
+    "5": {
+      "best_iteration": 37,
+      "validation": {
+        "model": {
+          "n": 6060,
+          "mae": 0.03820893317603939,
+          "rmse": 0.04787263364017038,
+          "r2": 0.9947569285454779
+        },
+        "persistence": {
+          "n": 6060,
+          "mae": 0.03843646864686472,
+          "rmse": 0.0482180399118141,
+          "r2": 0.9946809969382456
+        },
+        "rmse_skill_vs_persistence": 0.007163424151529929
+      },
+      "test": {
+        "model": {
+          "n": 6199,
+          "mae": 0.03896788516997028,
+          "rmse": 0.0499646962770078,
+          "r2": 0.994712001353561
+        },
+        "persistence": {
+          "n": 6199,
+          "mae": 0.03827068882077758,
+          "rmse": 0.04804037260035129,
+          "r2": 0.9951114780901437
+        },
+        "rmse_skill_vs_persistence": -0.04005638533791145
+      },
+      "test_segments": {
+        "asset_type": {
+          "Compute": {
+            "model": {
+              "n": 2279,
+              "mae": 0.039303391630030424,
+              "rmse": 0.05103525383107676,
+              "r2": 0.9966376533591913
+            },
+            "persistence": {
+              "n": 2279,
+              "mae": 0.03733742869679688,
+              "rmse": 0.04671436267960483,
+              "r2": 0.9971828966307529
+            },
+            "rmse_skill_vs_persistence": -0.09249598846305984
+          },
+          "Edge": {
+            "model": {
+              "n": 815,
+              "mae": 0.04039153668701372,
+              "rmse": 0.05377834361144701,
+              "r2": 0.9646604543384878
+            },
+            "persistence": {
+              "n": 815,
+              "mae": 0.040052760736196374,
+              "rmse": 0.050526880412032016,
+              "r2": 0.9688045619226281
+            },
+            "rmse_skill_vs_persistence": -0.06435115670906777
+          },
+          "GPU": {
+            "model": {
+              "n": 1035,
+              "mae": 0.038705612918118956,
+              "rmse": 0.04898849456421865,
+              "r2": 0.9797624611945978
+            },
+            "persistence": {
+              "n": 1035,
+              "mae": 0.03892657004830918,
+              "rmse": 0.04922470413912656,
+              "r2": 0.9795668305611701
+            },
+            "rmse_skill_vs_persistence": 0.0047985981640498165
+          },
+          "Storage": {
+            "model": {
+              "n": 2070,
+              "mae": 0.0381691202288102,
+              "rmse": 0.04764405105143604,
+              "r2": 0.9934247918621146
+            },
+            "persistence": {
+              "n": 2070,
+              "mae": 0.03826859903381647,
+              "rmse": 0.04787604768596704,
+              "r2": 0.99336060168266
+            },
+            "rmse_skill_vs_persistence": 0.0048457766616979425
+          }
+        },
+        "workload_level": {
+          "high": {
+            "model": {
+              "n": 1760,
+              "mae": 0.040993015121968346,
+              "rmse": 0.05096782972947709,
+              "r2": 0.9936102506314768
+            },
+            "persistence": {
+              "n": 1760,
+              "mae": 0.04108693181818188,
+              "rmse": 0.05104659747364529,
+              "r2": 0.9935904854163966
+            },
+            "rmse_skill_vs_persistence": 0.0015430557190195815
+          },
+          "low": {
+            "model": {
+              "n": 2548,
+              "mae": 0.0380574123184398,
+              "rmse": 0.04887176223238345,
+              "r2": 0.9923001339671492
+            },
+            "persistence": {
+              "n": 2548,
+              "mae": 0.03804513343799061,
+              "rmse": 0.047937537033403074,
+              "r2": 0.9925916992594307
+            },
+            "rmse_skill_vs_persistence": -0.019488385444780043
+          },
+          "medium": {
+            "model": {
+              "n": 1891,
+              "mae": 0.03830985032606919,
+              "rmse": 0.05047562210691468,
+              "r2": 0.9964135396756928
+            },
+            "persistence": {
+              "n": 1891,
+              "mae": 0.03595346377578003,
+              "rmse": 0.04520989301280762,
+              "r2": 0.997122802801346
+            },
+            "rmse_skill_vs_persistence": -0.11647293862463526
+          }
+        },
+        "inlet_range": {
+          "cool": {
+            "model": {
+              "n": 1943,
+              "mae": 0.03920426709575841,
+              "rmse": 0.04909058926597607,
+              "r2": 0.9382727420892968
+            },
+            "persistence": {
+              "n": 1943,
+              "mae": 0.03932424086464237,
+              "rmse": 0.04945070899047178,
+              "r2": 0.9373637801818435
+            },
+            "rmse_skill_vs_persistence": 0.007282397600509527
+          },
+          "mid": {
+            "model": {
+              "n": 2264,
+              "mae": 0.038097915526594806,
+              "rmse": 0.048736323952513275,
+              "r2": 0.9340864483296727
+            },
+            "persistence": {
+              "n": 2264,
+              "mae": 0.03803356890459368,
+              "rmse": 0.04753593582066407,
+              "r2": 0.9372933971993289
+            },
+            "rmse_skill_vs_persistence": -0.02525222468277133
+          },
+          "warm": {
+            "model": {
+              "n": 1992,
+              "mae": 0.039726078538843634,
+              "rmse": 0.05214137151517429,
+              "r2": 0.9881489464821148
+            },
+            "persistence": {
+              "n": 1992,
+              "mae": 0.03751255020080323,
+              "rmse": 0.0472076237376531,
+              "r2": 0.9902855920254453
+            },
+            "rmse_skill_vs_persistence": -0.10451167389698535
+          }
+        },
+        "injected_anomaly": {
+          "during_injected_anomaly": {
+            "n": 10,
+            "note": "fewer than 30 rows; not evaluated"
+          },
+          "no_anomaly": {
+            "model": {
+              "n": 6189,
+              "mae": 0.03899006450104732,
+              "rmse": 0.04998888151481594,
+              "r2": 0.9947072589976191
+            },
+            "persistence": {
+              "n": 6189,
+              "mae": 0.0382931006624657,
+              "rmse": 0.048062966993844845,
+              "r2": 0.9951072282409585
+            },
+            "rmse_skill_vs_persistence": -0.0400706540072262
+          }
+        }
+      },
+      "per_asset_mae": {
+        "assets": 20,
+        "model_better_than_persistence": 16,
+        "model_median": 0.037462010487730076,
+        "persistence_median": 0.03760029901500951
+      },
+      "top_features_by_gain": {
+        "inlet_temperature_c_std_5m": 5.988672256469727,
+        "inlet_temperature_c_min_15m": 4.893526554107666,
+        "inlet_temperature_c_rate_1m": 4.073300361633301,
+        "inlet_temperature_c_std_15m": 3.653228282928467,
+        "power_consumption_kw": 3.5862677097320557,
+        "power_consumption_kw_rate_5m": 3.0195393562316895,
+        "airflow_cfm": 3.004699468612671,
+        "fan_speed_rpm": 2.9486453533172607,
+        "inlet_temperature_c": 2.2725155353546143,
+        "exhaust_temperature_c": 2.2502312660217285,
+        "hour_sin": 2.1239168643951416,
+        "inlet_temperature_c_rate_5m": 2.104785442352295
+      }
+    },
+    "10": {
+      "best_iteration": 19,
+      "validation": {
+        "model": {
+          "n": 6063,
+          "mae": 0.05223226305787389,
+          "rmse": 0.06519854351066622,
+          "r2": 0.9903105287928229
+        },
+        "persistence": {
+          "n": 6063,
+          "mae": 0.05251212271152894,
+          "rmse": 0.06564264708966884,
+          "r2": 0.9901780784614994
+        },
+        "rmse_skill_vs_persistence": 0.006765473342291828
+      },
+      "test": {
+        "model": {
+          "n": 6051,
+          "mae": 0.05175082456127625,
+          "rmse": 0.06563370563732532,
+          "r2": 0.9908591629061626
+        },
+        "persistence": {
+          "n": 6051,
+          "mae": 0.051420095851925335,
+          "rmse": 0.06469565299240007,
+          "r2": 0.9911185817918836
+        },
+        "rmse_skill_vs_persistence": -0.01449946946258418
+      },
+      "test_segments": {
+        "asset_type": {
+          "Compute": {
+            "model": {
+              "n": 2225,
+              "mae": 0.050173642731059544,
+              "rmse": 0.06282799312813589,
+              "r2": 0.9948953175957485
+            },
+            "persistence": {
+              "n": 2225,
+              "mae": 0.04893438202247195,
+              "rmse": 0.06172375209782467,
+              "r2": 0.9950731766789258
+            },
+            "rmse_skill_vs_persistence": -0.017890050309338434
+          },
+          "Edge": {
+            "model": {
+              "n": 796,
+              "mae": 0.05436672238914233,
+              "rmse": 0.07247899969852557,
+              "r2": 0.9355316099859019
+            },
+            "persistence": {
+              "n": 796,
+              "mae": 0.05402638190954775,
+              "rmse": 0.0670902508476006,
+              "r2": 0.9447615766502717
+            },
+            "rmse_skill_vs_persistence": -0.08032089286960375
+          },
+          "GPU": {
+            "model": {
+              "n": 1010,
+              "mae": 0.05336948901731979,
+              "rmse": 0.06858909090017573,
+              "r2": 0.9608275319576401
+            },
+            "persistence": {
+              "n": 1010,
+              "mae": 0.05368910891089102,
+              "rmse": 0.068862195580725,
+              "r2": 0.9605149608772117
+            },
+            "rmse_skill_vs_persistence": 0.003965959526067042
+          },
+          "Storage": {
+            "model": {
+              "n": 2020,
+              "mae": 0.051647915551695456,
+              "rmse": 0.06429537585355243,
+              "r2": 0.987992387149314
+            },
+            "persistence": {
+              "n": 2020,
+              "mae": 0.05199653465346542,
+              "rmse": 0.06478248067170786,
+              "r2": 0.9878097574650352
+            },
+            "rmse_skill_vs_persistence": 0.007519082522077114
+          }
+        },
+        "workload_level": {
+          "high": {
+            "model": {
+              "n": 1730,
+              "mae": 0.055520034169333515,
+              "rmse": 0.06983640321479138,
+              "r2": 0.9879250257044453
+            },
+            "persistence": {
+              "n": 1730,
+              "mae": 0.055857225433526045,
+              "rmse": 0.07019816294551348,
+              "r2": 0.9877996024806767
+            },
+            "rmse_skill_vs_persistence": 0.005153407376242702
+          },
+          "low": {
+            "model": {
+              "n": 2470,
+              "mae": 0.05022729146881629,
+              "rmse": 0.06452682952393196,
+              "r2": 0.9866505395297712
+            },
+            "persistence": {
+              "n": 2470,
+              "mae": 0.05014048582995952,
+              "rmse": 0.06277438233008015,
+              "r2": 0.987365793929846
+            },
+            "rmse_skill_vs_persistence": -0.02791659796247936
+          },
+          "medium": {
+            "model": {
+              "n": 1851,
+              "mae": 0.050261032079610676,
+              "rmse": 0.06299136706848454,
+              "r2": 0.9943767174935195
+            },
+            "persistence": {
+              "n": 1851,
+              "mae": 0.04898055105348466,
+              "rmse": 0.06179480605281771,
+              "r2": 0.9945883240649207
+            },
+            "rmse_skill_vs_persistence": -0.01936345612354695
+          }
+        },
+        "inlet_range": {
+          "cool": {
+            "model": {
+              "n": 1893,
+              "mae": 0.05212570472976513,
+              "rmse": 0.06557838596136242,
+              "r2": 0.8908749610103914
+            },
+            "persistence": {
+              "n": 1893,
+              "mae": 0.052395668251452754,
+              "rmse": 0.06628336853640206,
+              "r2": 0.8885161117010234
+            },
+            "rmse_skill_vs_persistence": 0.01063588937325155
+          },
+          "mid": {
+            "model": {
+              "n": 2213,
+              "mae": 0.05152584092633216,
+              "rmse": 0.06659917289730075,
+              "r2": 0.8797007670413128
+            },
+            "persistence": {
+              "n": 2213,
+              "mae": 0.051401265250790806,
+              "rmse": 0.0646614493153718,
+              "r2": 0.8865992162358233
+            },
+            "rmse_skill_vs_persistence": -0.029967215434317573
+          },
+          "warm": {
+            "model": {
+              "n": 1945,
+              "mae": 0.05164195084671676,
+              "rmse": 0.06457236470250487,
+              "r2": 0.9819831222021621
+            },
+            "persistence": {
+              "n": 1945,
+              "mae": 0.050492030848329074,
+              "rmse": 0.06315191216647983,
+              "r2": 0.9827670685296707
+            },
+            "rmse_skill_vs_persistence": -0.022492629079551296
+          }
+        },
+        "injected_anomaly": {
+          "during_injected_anomaly": {
+            "n": 10,
+            "note": "fewer than 30 rows; not evaluated"
+          },
+          "no_anomaly": {
+            "model": {
+              "n": 6041,
+              "mae": 0.051771625120549954,
+              "rmse": 0.06565992804859519,
+              "r2": 0.9908538230302537
+            },
+            "persistence": {
+              "n": 6041,
+              "mae": 0.05143933123655027,
+              "rmse": 0.0647187119019938,
+              "r2": 0.9911141592597694
+            },
+            "rmse_skill_vs_persistence": -0.014543184172557622
+          }
+        }
+      },
+      "per_asset_mae": {
+        "assets": 20,
+        "model_better_than_persistence": 11,
+        "model_median": 0.04936534060542022,
+        "persistence_median": 0.04981239736767382
+      },
+      "top_features_by_gain": {
+        "inlet_temperature_c_min_15m": 21.244550704956055,
+        "inlet_temperature_c_rate_1m": 14.214264869689941,
+        "fan_speed_rpm": 8.555578231811523,
+        "inlet_temperature_c_std_15m": 8.37601089477539,
+        "hour_sin": 6.329043388366699,
+        "inlet_temperature_c_mean_15m": 5.70869779586792,
+        "temperature_delta_c": 5.346912860870361,
+        "inlet_temperature_c_min_5m": 5.223691940307617,
+        "memory_utilization": 4.593343257904053,
+        "inlet_temperature_c_rate_5m": 4.4713215827941895,
+        "gpu_utilization": 4.456720352172852,
+        "cpu_utilization": 4.300320148468018
+      }
+    }
+  },
+  "validity": {
+    "model_label": "forecasting_baseline",
+    "controllable_settings": {
+      "fan_speed_rpm": {
+        "setting": "fan_speed_rpm",
+        "validated": false,
+        "median_independent_variation_share": 0.7432,
+        "by_horizon": {
+          "5": {
+            "assets": 35,
+            "assets_expected_sign_and_significant": 0,
+            "share": 0.0,
+            "median_coef_per_unit": -4.587053430496641e-06,
+            "assets_with_expected_sign": 18
+          },
+          "10": {
+            "assets": 35,
+            "assets_expected_sign_and_significant": 1,
+            "share": 0.029,
+            "median_coef_per_unit": 1.4721068771970387e-07,
+            "assets_with_expected_sign": 17
+          }
+        },
+        "reasons": [
+          "fan_speed_rpm @ 5 min: independent movements are followed by the expected inlet response (sign -1, |NW t| >= 3.0) in only 0 of 35 assets (needs >= 80%)",
+          "fan_speed_rpm @ 10 min: independent movements are followed by the expected inlet response (sign -1, |NW t| >= 3.0) in only 1 of 35 assets (needs >= 80%)"
+        ],
+        "per_asset": [
+          {
+            "asset_id": "SIM-NA-001",
+            "independent_variation_share": 0.9483,
+            "horizons": {
+              "5": {
+                "coef_per_unit": -9.039953502167306e-05,
+                "nw_t": -1.59,
+                "rows": 981
+              },
+              "10": {
+                "coef_per_unit": -0.00019425969550422538,
+                "nw_t": -2.25,
+                "rows": 977
+              }
+            }
+          },
+          {
+            "asset_id": "SIM-NA-002",
+            "independent_variation_share": 0.7807,
+            "horizons": {
+              "5": {
+                "coef_per_unit": 4.253593469212164e-05,
+                "nw_t": 0.83,
+                "rows": 981
+              },
+              "10": {
+                "coef_per_unit": 7.860437758054304e-05,
+                "nw_t": 0.84,
+                "rows": 977
+              }
+            }
+          },
+          {
+            "asset_id": "SIM-NA-003",
+            "independent_variation_share": 0.4227,
+            "horizons": {
+              "5": {
+                "coef_per_unit": -0.00016693080773446075,
+                "nw_t": -2.75,
+                "rows": 972
+              },
+              "10": {
+                "coef_per_unit": -0.0003119902059056127,
+                "nw_t": -3.05,
+                "rows": 966
+              }
+            }
+          },
+          {
+            "asset_id": "SIM-NA-004",
+            "independent_variation_share": 0.6934,
+            "horizons": {
+              "5": {
+                "coef_per_unit": 3.1087505934304185e-05,
+                "nw_t": 0.56,
+                "rows": 967
+              },
+              "10": {
+                "coef_per_unit": 7.064912659874775e-06,
+                "nw_t": 0.08,
+                "rows": 963
+              }
+            }
+          },
+          {
+            "asset_id": "SIM-NA-005",
+            "independent_variation_share": 0.6087,
+            "horizons": {
+              "5": {
+                "coef_per_unit": 2.6039604168530613e-05,
+                "nw_t": 0.63,
+                "rows": 961
+              },
+              "10": {
+                "coef_per_unit": 2.8246657704869093e-05,
+                "nw_t": 0.44,
+                "rows": 956
+              }
+            }
+          },
+          {
+            "asset_id": "SIM-NA-006",
+            "independent_variation_share": 0.6638,
+            "horizons": {
+              "5": {
+                "coef_per_unit": -4.587053430496641e-06,
+                "nw_t": -0.11,
+                "rows": 973
+              },
+              "10": {
+                "coef_per_unit": -2.692497224276728e-05,
+                "nw_t": -0.36,
+                "rows": 968
+              }
+            }
+          },
+          {
+            "asset_id": "SIM-NA-007",
+            "independent_variation_share": 0.8716,
+            "horizons": {
+              "5": {
+                "coef_per_unit": 4.84030995967789e-05,
+                "nw_t": 1.17,
+                "rows": 971
+              },
+              "10": {
+                "coef_per_unit": 8.978850229510563e-05,
+                "nw_t": 1.15,
+                "rows": 966
+              }
+            }
+          },
+          {
+            "asset_id": "SIM-NA-008",
+            "independent_variation_share": 0.7888,
+            "horizons": {
+              "5": {
+                "coef_per_unit": 3.991092412450092e-06,
+                "nw_t": 0.09,
+                "rows": 969
+              },
+              "10": {
+                "coef_per_unit": 1.4721068771970387e-07,
+                "nw_t": 0.0,
+                "rows": 964
+              }
+            }
+          },
+          {
+            "asset_id": "SIM-NA-009",
+            "independent_variation_share": 0.821,
+            "horizons": {
+              "5": {
+                "coef_per_unit": -4.939398544289876e-05,
+                "nw_t": -0.96,
+                "rows": 969
+              },
+              "10": {
+                "coef_per_unit": -6.044040560901299e-05,
+                "nw_t": -0.65,
+                "rows": 964
+              }
+            }
+          },
+          {
+            "asset_id": "SIM-NA-010",
+            "independent_variation_share": 0.7258,
+            "horizons": {
+              "5": {
+                "coef_per_unit": -4.801811410016684e-05,
+                "nw_t": -0.41,
+                "rows": 969
+              },
+              "10": {
+                "coef_per_unit": -0.00019110517846815842,
+                "nw_t": -0.84,
+                "rows": 964
+              }
+            }
+          },
+          {
+            "asset_id": "SIM-NA-011",
+            "independent_variation_share": 0.5908,
+            "horizons": {
+              "5": {
+                "coef_per_unit": 0.00012821923028690028,
+                "nw_t": 1.21,
+                "rows": 966
+              },
+              "10": {
+                "coef_per_unit": 0.00027638179117487406,
+                "nw_t": 1.83,
+                "rows": 961
+              }
+            }
+          },
+          {
+            "asset_id": "SIM-NA-012",
+            "independent_variation_share": 0.7669,
+            "horizons": {
+              "5": {
+                "coef_per_unit": -0.00012430385674223828,
+                "nw_t": -1.58,
+                "rows": 973
+              },
+              "10": {
+                "coef_per_unit": -0.00016053473227862282,
+                "nw_t": -1.25,
+                "rows": 969
+              }
+            }
+          },
+          {
+            "asset_id": "SIM-NA-013",
+            "independent_variation_share": 0.5568,
+            "horizons": {
+              "5": {
+                "coef_per_unit": 7.1122441655997055e-06,
+                "nw_t": 0.04,
+                "rows": 965
+              },
+              "10": {
+                "coef_per_unit": 8.792319633451045e-05,
+                "nw_t": 0.29,
+                "rows": 961
+              }
+            }
+          },
+          {
+            "asset_id": "SIM-NA-014",
+            "independent_variation_share": 0.7822,
+            "horizons": {
+              "5": {
+                "coef_per_unit": 5.359923624609054e-05,
+                "nw_t": 1.3,
+                "rows": 961
+              },
+              "10": {
+                "coef_per_unit": 8.198829163795469e-05,
+                "nw_t": 1.21,
+                "rows": 956
+              }
+            }
+          },
+          {
+            "asset_id": "SIM-NA-015",
+            "independent_variation_share": 0.8484,
+            "horizons": {
+              "5": {
+                "coef_per_unit": -4.488364862450073e-05,
+                "nw_t": -0.75,
+                "rows": 973
+              },
+              "10": {
+                "coef_per_unit": -0.00014409247341392228,
+                "nw_t": -1.34,
+                "rows": 968
+              }
+            }
+          },
+          {
+            "asset_id": "SIM-NA-016",
+            "independent_variation_share": 0.5704,
+            "horizons": {
+              "5": {
+                "coef_per_unit": 1.6873240733688334e-05,
+                "nw_t": 0.44,
+                "rows": 973
+              },
+              "10": {
+                "coef_per_unit": 9.931019408497213e-05,
+                "nw_t": 1.34,
+                "rows": 968
+              }
+            }
+          },
+          {
+            "asset_id": "SIM-NA-017",
+            "independent_variation_share": 0.7188,
+            "horizons": {
+              "5": {
+                "coef_per_unit": -2.8859280610994272e-05,
+                "nw_t": -0.37,
+                "rows": 959
+              },
+              "10": {
+                "coef_per_unit": -4.281893602992488e-05,
+                "nw_t": -0.33,
+                "rows": 956
+              }
+            }
+          },
+          {
+            "asset_id": "SIM-NA-018",
+            "independent_variation_share": 0.8228,
+            "horizons": {
+              "5": {
+                "coef_per_unit": -0.0003679086879550691,
+                "nw_t": -1.71,
+                "rows": 969
+              },
+              "10": {
+                "coef_per_unit": -0.0007362115648272522,
+                "nw_t": -1.77,
+                "rows": 966
+              }
+            }
+          },
+          {
+            "asset_id": "SIM-NA-019",
+            "independent_variation_share": 0.5237,
+            "horizons": {
+              "5": {
+                "coef_per_unit": -4.4636923058317686e-05,
+                "nw_t": -0.65,
+                "rows": 973
+              },
+              "10": {
+                "coef_per_unit": -0.00019057023727219255,
+                "nw_t": -1.66,
+                "rows": 968
+              }
+            }
+          },
+          {
+            "asset_id": "SIM-NA-020",
+            "independent_variation_share": 0.8389,
+            "horizons": {
+              "5": {
+                "coef_per_unit": -5.694615121550795e-05,
+                "nw_t": -1.28,
+                "rows": 977
+              },
+              "10": {
+                "coef_per_unit": -7.954057430652691e-05,
+                "nw_t": -1.01,
+                "rows": 972
+              }
+            }
+          },
+          {
+            "asset_id": "SIM-NA-001",
+            "independent_variation_share": 0.9976,
+            "horizons": {
+              "5": {
+                "coef_per_unit": 0.0003344328860972991,
+                "nw_t": 0.42,
+                "rows": 577
+              },
+              "10": {
+                "coef_per_unit": 0.00040734145186480233,
+                "nw_t": 0.22,
+                "rows": 572
+              }
+            }
+          },
+          {
+            "asset_id": "SIM-NA-002",
+            "independent_variation_share": 0.5812,
+            "horizons": {
+              "5": {
+                "coef_per_unit": -4.7788701446968276e-05,
+                "nw_t": -0.62,
+                "rows": 591
+              },
+              "10": {
+                "coef_per_unit": -2.963870645863239e-05,
+                "nw_t": -0.25,
+                "rows": 586
+              }
+            }
+          },
+          {
+            "asset_id": "SIM-NA-003",
+            "independent_variation_share": 0.7606,
+            "horizons": {
+              "5": {
+                "coef_per_unit": 2.4589842436562805e-05,
+                "nw_t": 0.46,
+                "rows": 591
+              },
+              "10": {
+                "coef_per_unit": 7.13040623307465e-05,
+                "nw_t": 0.74,
+                "rows": 586
+              }
+            }
+          },
+          {
+            "asset_id": "SIM-NA-004",
+            "independent_variation_share": 0.5711,
+            "horizons": {
+              "5": {
+                "coef_per_unit": 0.00012152831643229467,
+                "nw_t": 1.53,
+                "rows": 585
+              },
+              "10": {
+                "coef_per_unit": 0.0001663853200804874,
+                "nw_t": 1.11,
+                "rows": 580
+              }
+            }
+          },
+          {
+            "asset_id": "SIM-NA-005",
+            "independent_variation_share": 0.8193,
+            "horizons": {
+              "5": {
+                "coef_per_unit": -7.171906378862909e-05,
+                "nw_t": -0.21,
+                "rows": 576
+              },
+              "10": {
+                "coef_per_unit": 0.0005193204217545217,
+                "nw_t": 0.95,
+                "rows": 570
+              }
+            }
+          },
+          {
+            "asset_id": "SIM-NA-002",
+            "independent_variation_share": 0.9988,
+            "horizons": {}
+          },
+          {
+            "asset_id": "SIM-NA-001",
+            "independent_variation_share": 0.4748,
+            "horizons": {
+              "5": {
+                "coef_per_unit": -6.17664703368426e-05,
+                "nw_t": -1.79,
+                "rows": 965
+              },
+              "10": {
+                "coef_per_unit": -8.651846630718869e-05,
+                "nw_t": -1.4,
+                "rows": 960
+              }
+            }
+          },
+          {
+            "asset_id": "SIM-NA-002",
+            "independent_variation_share": 0.6457,
+            "horizons": {
+              "5": {
+                "coef_per_unit": -9.909076918942454e-05,
+                "nw_t": -1.63,
+                "rows": 985
+              },
+              "10": {
+                "coef_per_unit": -0.00020589730199700227,
+                "nw_t": -1.88,
+                "rows": 980
+              }
+            }
+          },
+          {
+            "asset_id": "SIM-NA-003",
+            "independent_variation_share": 0.688,
+            "horizons": {
+              "5": {
+                "coef_per_unit": 0.000100615229330399,
+                "nw_t": 2.2,
+                "rows": 975
+              },
+              "10": {
+                "coef_per_unit": 0.00022364339484401893,
+                "nw_t": 3.08,
+                "rows": 970
+              }
+            }
+          },
+          {
+            "asset_id": "SIM-NA-004",
+            "independent_variation_share": 0.9684,
+            "horizons": {
+              "5": {
+                "coef_per_unit": 2.010579084964576e-05,
+                "nw_t": 0.53,
+                "rows": 957
+              },
+              "10": {
+                "coef_per_unit": 2.7896977740344405e-05,
+                "nw_t": 0.42,
+                "rows": 953
+              }
+            }
+          },
+          {
+            "asset_id": "SIM-NA-005",
+            "independent_variation_share": 0.5546,
+            "horizons": {
+              "5": {
+                "coef_per_unit": -0.00029121328361915346,
+                "nw_t": -1.18,
+                "rows": 971
+              },
+              "10": {
+                "coef_per_unit": -0.0005460754922141963,
+                "nw_t": -1.06,
+                "rows": 967
+              }
+            }
+          },
+          {
+            "asset_id": "SIM-NA-006",
+            "independent_variation_share": 0.6776,
+            "horizons": {
+              "5": {
+                "coef_per_unit": 4.0136274069676374e-05,
+                "nw_t": 0.29,
+                "rows": 979
+              },
+              "10": {
+                "coef_per_unit": -6.95404457008957e-05,
+                "nw_t": -0.33,
+                "rows": 975
+              }
+            }
+          },
+          {
+            "asset_id": "SIM-NA-007",
+            "independent_variation_share": 0.6324,
+            "horizons": {
+              "5": {
+                "coef_per_unit": 3.9855411747859675e-05,
+                "nw_t": 0.54,
+                "rows": 975
+              },
+              "10": {
+                "coef_per_unit": 8.332268849555556e-05,
+                "nw_t": 0.71,
+                "rows": 970
+              }
+            }
+          },
+          {
+            "asset_id": "SIM-NA-008",
+            "independent_variation_share": 0.9197,
+            "horizons": {
+              "5": {
+                "coef_per_unit": -5.090228868978396e-05,
+                "nw_t": -0.56,
+                "rows": 981
+              },
+              "10": {
+                "coef_per_unit": 5.017357183117385e-05,
+                "nw_t": 0.34,
+                "rows": 976
+              }
+            }
+          },
+          {
+            "asset_id": "SIM-NA-009",
+            "independent_variation_share": 0.9038,
+            "horizons": {
+              "5": {
+                "coef_per_unit": 0.0003502544053950502,
+                "nw_t": 1.16,
+                "rows": 983
+              },
+              "10": {
+                "coef_per_unit": 0.00044275701093903955,
+                "nw_t": 1.12,
+                "rows": 978
+              }
+            }
+          },
+          {
+            "asset_id": "SIM-NA-010",
+            "independent_variation_share": 0.8128,
+            "horizons": {
+              "5": {
+                "coef_per_unit": -5.5639890455449394e-05,
+                "nw_t": -1.09,
+                "rows": 977
+              },
+              "10": {
+                "coef_per_unit": -0.00013031917975599668,
+                "nw_t": -1.44,
+                "rows": 972
+              }
+            }
+          }
+        ],
+        "is_model_feature": true
+      }
+    },
+    "model_sensitivity": {
+      "fan_speed_rpm": {
+        "5": {
+          "mean_prediction_change_per_100_units": 6.295279945334187e-06,
+          "note": "model output change when only this input is shifted; reflects learned associations, not a validated physical response"
+        },
+        "10": {
+          "mean_prediction_change_per_100_units": 1.1992385225312319e-05,
+          "note": "model output change when only this input is shifted; reflects learned associations, not a validated physical response"
+        }
+      }
+    },
+    "variable_profile": {
+      "workload_intensity": {
+        "status": "varies",
+        "assets_with_values": 37,
+        "median_within_asset_std": 0.08664,
+        "median_distinct_values": 264
+      },
+      "cpu_utilization": {
+        "status": "varies",
+        "assets_with_values": 37,
+        "median_within_asset_std": 6.03297,
+        "median_distinct_values": 956
+      },
+      "gpu_utilization": {
+        "status": "varies",
+        "assets_with_values": 5,
+        "median_within_asset_std": 7.59053,
+        "median_distinct_values": 960
+      },
+      "memory_utilization": {
+        "status": "varies",
+        "assets_with_values": 37,
+        "median_within_asset_std": 2.85683,
+        "median_distinct_values": 932
+      },
+      "storage_utilization": {
+        "status": "varies",
+        "assets_with_values": 37,
+        "median_within_asset_std": 0.83322,
+        "median_distinct_values": 828
+      },
+      "disk_io_iops": {
+        "status": "varies",
+        "assets_with_values": 37,
+        "median_within_asset_std": 155.53837,
+        "median_distinct_values": 985
+      },
+      "network_throughput_gbps": {
+        "status": "varies",
+        "assets_with_values": 37,
+        "median_within_asset_std": 1.12297,
+        "median_distinct_values": 861
+      },
+      "network_latency_ms": {
+        "status": "varies",
+        "assets_with_values": 37,
+        "median_within_asset_std": 2.89631,
+        "median_distinct_values": 931
+      },
+      "ambient_temperature_c": {
+        "status": "varies",
+        "assets_with_values": 37,
+        "median_within_asset_std": 0.38584,
+        "median_distinct_values": 707
+      },
+      "humidity_percentage": {
+        "status": "varies",
+        "assets_with_values": 37,
+        "median_within_asset_std": 0.46795,
+        "median_distinct_values": 746
+      },
+      "inlet_temperature_c": {
+        "status": "varies",
+        "assets_with_values": 37,
+        "median_within_asset_std": 0.09086,
+        "median_distinct_values": 331
+      },
+      "exhaust_temperature_c": {
+        "status": "varies",
+        "assets_with_values": 37,
+        "median_within_asset_std": 0.8819,
+        "median_distinct_values": 784
+      },
+      "fan_speed_rpm": {
+        "status": "varies",
+        "assets_with_values": 37,
+        "median_within_asset_std": 75.88461,
+        "median_distinct_values": 982
+      },
+      "airflow_cfm": {
+        "status": "varies",
+        "assets_with_values": 37,
+        "median_within_asset_std": 4.5719,
+        "median_distinct_values": 947
+      },
+      "power_consumption_kw": {
+        "status": "varies",
+        "assets_with_values": 37,
+        "median_within_asset_std": 5.62416,
+        "median_distinct_values": 948
+      },
+      "pue": {
+        "status": "varies",
+        "assets_with_values": 37,
+        "median_within_asset_std": 0.0027,
+        "median_distinct_values": 14
+      },
+      "temperature_delta_c": {
+        "status": "varies",
+        "assets_with_values": 37,
+        "median_within_asset_std": 0.87988,
+        "median_distinct_values": 791
+      }
+    },
+    "unavailable_inputs": {
+      "cooling_efficiency": "not in the telemetry schema",
+      "cooling_power": "no cooling-system power is measured; power_consumption_kw is per-server IT power",
+      "cooling_setpoints": "no setpoint or actuator-command field exists"
+    }
+  },
+  "duration_seconds": 6.91
+}

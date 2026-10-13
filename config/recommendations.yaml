@@ -1,0 +1,36 @@
+# Multi-agent cooling recommendation workflow (RECOMMENDATION-ONLY: nothing can actuate equipment).
+# Override the file location with RECOMMENDATIONS_CONFIG=<path>.
+#
+# Temperature limits are NOT here: they come from config/cooling_state.yaml (limits.*), and the
+# optimizer's T_safe/actuator bounds from config/cooling_model.yaml. Nothing in this file is an
+# equipment limit. The values below are ANALYSIS HEURISTICS (how much evidence is required),
+# chosen as starting points; change them freely.
+
+history:
+  # Previous windows (each as long as cooling_state.yaml window_minutes) used for the
+  # persistence check and the comparison with recent operating history.
+  comparison_windows: 3
+
+evidence:
+  # MAINTENANCE_INSPECTION needs the same anomaly rule in the current window and in this many
+  # windows in total (current + previous). Must be <= comparison_windows + 1.
+  maintenance_min_persistent_windows: 3
+  # A current-window mean is "unusual" when it differs from the history mean by more than this many
+  # history standard deviations (needs >= 2 history windows). Used only as supporting evidence.
+  history_deviation_z: 3.0
+
+workflow:
+  max_reanalysis_attempts: 1     # bounded re-analysis when an agent's findings fail validation
+
+energy_waste:
+  # Fan over-speed screening by peer comparison (src/data_engineering/energy/fan_peer.py).
+  # RELATIVE ONLY (no kW): there is no measured cooling power. All values are analysis heuristics.
+  lookback_minutes: 1440            # peer windows are drawn from this period
+  peer_group_by: [cooling_type, asset_type]   # liquid-cooled fans run ~40 % slower than air-cooled ones here
+  workload_tolerance: 0.10          # |workload_intensity difference| for a comparable window (0..1 scale)
+  inlet_tolerance_c: 1.0            # |inlet difference| for a comparable window
+  min_reference_windows: 8
+  min_reference_assets: 2           # other assets contributing comparable windows
+  min_excess_fraction: 0.15         # fan >= 15 % above the peer median ...
+  reference_percentile: 90          # ... and above the peers' 90th percentile -> ELEVATED
+  min_elevated_windows: 2           # ELEVATED in at least this many compared windows -> REQUIRES_REVIEW

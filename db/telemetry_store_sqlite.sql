@@ -1,4 +1,4 @@
--- Operational telemetry store fed by the Kafka consumer (SQLite dialect). Schema version 1.
+-- Operational telemetry store fed by the Kafka consumer (SQLite dialect). Schema version 2.
 -- PostgreSQL equivalent: db/telemetry_store_postgres.sql (keep both in sync).
 -- Apply with: uv run python db/init_telemetry_store.py
 --
@@ -149,3 +149,63 @@ CREATE TABLE IF NOT EXISTS anomaly_records (
 );
 CREATE INDEX IF NOT EXISTS idx_anomaly_asset_time ON anomaly_records (asset_id, event_timestamp);
 CREATE INDEX IF NOT EXISTS idx_anomaly_batch ON anomaly_records (ingest_batch_id);
+
+-- ---- Schema version 2: recommendation analyses (recommendation-only; nothing here controls equipment) ----
+-- One row per analysis run of the LangGraph workflow (status, models, latency, token usage, node trace).
+CREATE TABLE IF NOT EXISTS recommendation_analyses (
+    analysis_id        TEXT PRIMARY KEY,
+    simulation_run_id  TEXT NOT NULL,
+    asset_id           TEXT NOT NULL,
+    window_start       TEXT,
+    window_end         TEXT,
+    status             TEXT NOT NULL CHECK (status IN ('COMPLETED', 'COMPLETED_WITH_FALLBACK', 'FAILED')),
+    trace_json         TEXT NOT NULL,
+    created_at         TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_analyses_asset ON recommendation_analyses (simulation_run_id, asset_id, created_at);
+
+-- One row per recommendation (or inconclusive result). The UNIQUE key prevents duplicates for the
+-- same asset, type and observation window.
+CREATE TABLE IF NOT EXISTS recommendations (
+    recommendation_id  TEXT PRIMARY KEY,
+    analysis_id        TEXT NOT NULL REFERENCES recommendation_analyses (analysis_id),
+    simulation_run_id  TEXT NOT NULL,
+    asset_id           TEXT NOT NULL,
+    recommendation_type TEXT NOT NULL,
+    status             TEXT NOT NULL CHECK (status IN ('REQUIRES_REVIEW', 'INCONCLUSIVE')),
+    severity           TEXT NOT NULL CHECK (severity IN ('INFO', 'WARNING', 'CRITICAL')),
+    window_start       TEXT,
+    window_end         TEXT NOT NULL,
+    payload_json       TEXT NOT NULL,
+    created_at         TEXT NOT NULL,
+    UNIQUE (simulation_run_id, asset_id, recommendation_type, window_end)
+);
+CREATE INDEX IF NOT EXISTS idx_recommendations_created ON recommendations (created_at);
+
+-- Human review decisions. Recording a decision never executes anything.
+CREATE TABLE IF NOT EXISTS recommendation_decisions (
+    decision_id        TEXT PRIMARY KEY,
+    recommendation_id  TEXT NOT NULL REFERENCES recommendations (recommendation_id),
+    decision           TEXT NOT NULL CHECK (decision IN ('APPROVED_FOR_EVALUATION', 'REJECTED', 'DEFERRED')),
+    reviewer           TEXT NOT NULL,
+    note               TEXT,
+    decided_at         TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_decisions_rec ON recommendation_decisions (recommendation_id, decided_at);
+
+-- Alerts: WARNING/CRITICAL findings of the cooling state estimator captured when recommendations are
+-- generated (one per asset, rule and observation window). Observations/inferences, never confirmed faults.
+CREATE TABLE IF NOT EXISTS alerts (
+    alert_id           TEXT PRIMARY KEY,
+    analysis_id        TEXT NOT NULL REFERENCES recommendation_analyses (analysis_id),
+    simulation_run_id  TEXT NOT NULL,
+    asset_id           TEXT NOT NULL,
+    rule_id            TEXT NOT NULL,
+    severity           TEXT NOT NULL CHECK (severity IN ('WARNING', 'CRITICAL')),
+    window_start       TEXT,
+    window_end         TEXT NOT NULL,
+    payload_json       TEXT NOT NULL,
+    created_at         TEXT NOT NULL,
+    UNIQUE (simulation_run_id, asset_id, rule_id, window_end)
+);
+CREATE INDEX IF NOT EXISTS idx_alerts_created ON alerts (created_at);

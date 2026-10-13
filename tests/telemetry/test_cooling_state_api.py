@@ -14,6 +14,18 @@ pytestmark = pytest.mark.anyio
 URL = "/api/v1/telemetry/cooling-state"
 
 
+EXPECTED_ROUTES = {"/api/v1/health", "/api/v1/telemetry/cooling-state", "/api/v1/dashboard/overview", "/api/v1/telemetry",
+     "/api/v1/assets", "/api/v1/assets/{asset_id}", "/api/v1/assets/{asset_id}/telemetry",
+     "/api/v1/cooling/predict", "/api/v1/cooling/optimize", "/api/v1/cooling-model/train",
+     "/api/v1/cooling-model/evaluate", "/api/v1/cooling-model/predict", "/api/v1/cooling-optimizer/recommend",
+     "/api/v1/recommendations", "/api/v1/recommendations/generate", "/api/v1/recommendations/{recommendation_id}",
+     "/api/v1/recommendations/{recommendation_id}/decisions", "/api/v1/recommendations/analyses/{analysis_id}",
+     "/api/v1/recommendations/agents/status", "/api/v1/alerts", "/api/v1/alerts/{alert_id}", "/api/v1/copilot/chat",
+     "/api/v1/digital-twin/layout", "/api/v1/digital-twin/layout/{object_id}", "/api/v1/digital-twin/state",
+     "/api/v1/digital-twin/overlays", "/api/v1/digital-twin/assets/{object_id}", "/api/v1/digital-twin/analyze",
+     "/api/v1/digital-twin/stream", "/api/v1/energy/fan-peer-comparison"}
+
+
 def error_code(response) -> str:
     return response.json()["error"]["code"]
 
@@ -116,9 +128,9 @@ async def test_legacy_path_still_works_but_is_not_documented(api_client, sqlite_
     legacy = await api_client.get("/api/telemetry/cooling-state", params={"asset_id": "A1"})
     assert legacy.status_code == 200 and legacy.json()["scope"]["asset_id"] == "A1"
     paths = (await api_client.get("/openapi.json")).json()["paths"]
-    assert set(paths) == {"/api/v1/health", "/api/v1/telemetry/cooling-state"}
+    assert set(paths) == EXPECTED_ROUTES and all(p.startswith("/api/v1/") for p in paths)
 
 
 async def test_health(api_client):
     r = await api_client.get("/api/v1/health")
-    assert r.json() == {"status": "ok", "database": "sqlite", "schema_version": 1}
+    assert r.json() == {"status": "ok", "database": "sqlite", "schema_version": 2}

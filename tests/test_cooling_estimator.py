@@ -35,11 +35,15 @@ def test_stable_telemetry_is_normal(sqlite_store):
 
 def test_unset_limits_are_never_reported_as_normal(sqlite_store):
     seed(sqlite_store, series("A1", MINUTES))
-    s = run(sqlite_store, cfg=config(), asset_id="A1")          # shipped config: all limits unset
+    from dataclasses import replace
+    from data_engineering.cooling.config import Limits
+    unset = replace(config(), limits=Limits()).validate()     # every threshold cleared
+    s = run(sqlite_store, cfg=unset, asset_id="A1")
     assert s.state == "PARTIALLY_ASSESSED" and s.findings == []
     reasons = {r.rule_id: r.reason for r in s.rules_not_evaluated}
     assert reasons["TH_INLET_ABOVE_LIMIT"] == "limits.inlet_temperature_high_c is not configured"
-    assert {"TH_RAPID_INLET_RISE", "AF_FAN_AIRFLOW_DIVERGENCE"} <= set(reasons)
+    assert {"TH_RAPID_INLET_RISE", "AF_FAN_AIRFLOW_DIVERGENCE", "TH_APPROACHING_INLET_LIMIT",
+            "WL_LIGHT_LOAD"} <= set(reasons)
 
 
 # 2./3. rising and elevated temperature -----------------------------------------------------------
@@ -48,15 +52,16 @@ def test_rapid_rise_in_recent_minutes(sqlite_store):
     # flat at 21 for 10 minutes, then +0.5 degC/min: recent rate 0.5 >= 0.3 (sustained limit raised out of the way)
     seed(sqlite_store, series("A1", MINUTES, inlet_temperature_c=lambda m: 21.0 + max(0, m - 10) * 0.5))
     s = run(sqlite_store, cfg=all_limits_config(sustained_inlet_rise_c_per_minute=1.0), asset_id="A1")
-    assert rule_ids(s) == ["TH_RAPID_INLET_RISE"] and s.state == "RAPID_TEMPERATURE_RISE"
-    f = s.findings[0]
+    assert rule_ids(s) == ["TH_APPROACHING_INLET_LIMIT", "TH_RAPID_INLET_RISE"]
+    assert s.state == "RAPID_TEMPERATURE_RISE"                 # ranks above APPROACHING_THERMAL_LIMIT
+    f = next(x for x in s.findings if x.rule_id == "TH_RAPID_INLET_RISE")
     assert f.kind == "inference" and f.evidence["rate_c_per_minute"] == pytest.approx(0.5)
 
 
 def test_sustained_rise_and_precedence_over_rapid_rise(sqlite_store):
     seed(sqlite_store, series("A1", MINUTES, inlet_temperature_c=lambda m: 20.0 + 0.4 * m))
     s = run(sqlite_store, asset_id="A1")
-    assert rule_ids(s) == ["TH_RAPID_INLET_RISE", "TH_SUSTAINED_INLET_RISE"]
+    assert rule_ids(s) == ["TH_APPROACHING_INLET_LIMIT", "TH_RAPID_INLET_RISE", "TH_SUSTAINED_INLET_RISE"]
     assert s.state == "HIGH_THERMAL_LOAD" and s.severity == "WARNING"   # tie broken by documented precedence
     assert s.metrics["inlet_temperature_c"].trend_per_minute == pytest.approx(0.4)
     assert s.metrics["inlet_temperature_c"].change == pytest.approx(5.6)
@@ -252,9 +257,13 @@ def test_window_parameter_changes_the_history(sqlite_store):
 
 # 11. configuration -----------------------------------------------------------------------------------
 
-def test_shipped_config_loads_with_all_limits_unset():
+def test_shipped_config_has_only_the_reference_starter_values():
     cfg = load_cooling_config()
-    assert cfg.window_minutes == 15 and all(v is None for v in vars(cfg.limits).values())
+    reference = {"inlet_temperature_high_c": 27.0, "inlet_approach_margin_c": 2.0,
+                 "inlet_approach_horizon_minutes": 15, "light_load_cpu_utilization_pct": 30,
+                 "light_load_gpu_utilization_pct": 30}
+    assert cfg.window_minutes == 15
+    assert {k: v for k, v in vars(cfg.limits).items() if v is not None} == reference
 
 
 @pytest.mark.parametrize("text, message", [
@@ -267,6 +276,8 @@ def test_shipped_config_loads_with_all_limits_unset():
     ("limits: {inlet_temperature_high_c: 30, inlet_temperature_critical_c: 25}", "critical"),
     ("limits: {airflow_drop_fraction: 1.5}", "between 0 and 1"),
     ("min_coverage: 2", "min_coverage"),
+    ("limits: {light_load_cpu_utilization_pct: 150}", "percent"),
+    ("limits: {inlet_approach_margin_c: -1}", "inlet_approach_margin_c"),
     ("trend_min_change: {cpu_utilization: -1}", "trend_min_change"),
     ("[1, 2]", "mapping"),
 ])
@@ -290,3 +301,109 @@ def test_invalid_configuration_is_rejected(tmp_path, text, message):
 def test_missing_config_file(tmp_path):
     with pytest.raises(CoolingConfigError, match="not found"):
         load_cooling_config(tmp_path / "absent.yaml")
+
+
+# 12. approaching the inlet limit ------------------------------------------------------------------
+
+def _approach(s):
+    return next(f for f in s.findings if f.rule_id == "TH_APPROACHING_INLET_LIMIT")
+
+
+def test_approaching_by_margin(sqlite_store):
+    seed(sqlite_store, series("A1", MINUTES, inlet_temperature_c=25.5))          # steady, 1.5 below 27
+    s = run(sqlite_store, asset_id="A1")
+    assert s.state == "APPROACHING_THERMAL_LIMIT" and s.severity == "WARNING"
+    f = _approach(s)
+    assert f.kind == "observation" and f.evidence["triggers"] == ["margin"]
+    assert f.evidence["headroom_c"] == 1.5 and f.evidence["minutes_to_limit"] is None   # not rising
+    assert s.approaching_limit_assets == ["A1"]
+
+
+def test_approaching_by_projection(sqlite_store):
+    # 21 for 10 min, then +0.5/min: latest 23 (4 below the limit), ~8 min to 27 at the recent rate
+    seed(sqlite_store, series("A1", MINUTES, inlet_temperature_c=lambda m: 21.0 + max(0, m - 10) * 0.5))
+    # rise-rate rules raised out of the way so the projection decides the state alone
+    s = run(sqlite_store, cfg=all_limits_config(rapid_inlet_rise_c_per_minute=5.0, sustained_inlet_rise_c_per_minute=5.0),
+            asset_id="A1")
+    f = _approach(s)
+    assert f.kind == "inference" and f.evidence["triggers"] == ["projection"]
+    assert f.evidence["minutes_to_limit"] == pytest.approx(8.0, abs=0.1)
+    assert "not a forecast" in f.explanation and s.state == "APPROACHING_THERMAL_LIMIT"
+
+
+def test_projection_beyond_the_horizon_does_not_fire(sqlite_store):
+    seed(sqlite_store, series("A1", MINUTES, inlet_temperature_c=lambda m: 20.0 + 0.1 * m))   # ~5.6 degC/0.1 = 56 min
+    s = run(sqlite_store, cfg=all_limits_config(sustained_inlet_rise_c_per_minute=1.0), asset_id="A1")
+    assert "TH_APPROACHING_INLET_LIMIT" not in rule_ids(s)
+
+
+def test_falling_temperature_is_not_projected(sqlite_store):
+    seed(sqlite_store, series("A1", MINUTES, inlet_temperature_c=lambda m: 24.0 - 0.1 * m))   # far and falling
+    assert "TH_APPROACHING_INLET_LIMIT" not in rule_ids(run(sqlite_store, asset_id="A1"))
+
+
+def test_above_the_limit_is_not_approaching(sqlite_store):
+    seed(sqlite_store, series("A1", MINUTES, inlet_temperature_c=28.0))
+    s = run(sqlite_store, asset_id="A1")
+    assert "TH_INLET_ABOVE_LIMIT" in rule_ids(s) and "TH_APPROACHING_INLET_LIMIT" not in rule_ids(s)
+
+
+def test_approaching_rule_needs_its_thresholds(sqlite_store):
+    seed(sqlite_store, series("A1", MINUTES, inlet_temperature_c=25.5))
+    no_limit = run(sqlite_store, cfg=all_limits_config(inlet_temperature_high_c=None,
+                                                       inlet_temperature_critical_c=None), asset_id="A1")
+    reasons = {r.rule_id: r.reason for r in no_limit.rules_not_evaluated}
+    assert reasons["TH_APPROACHING_INLET_LIMIT"] == "limits.inlet_temperature_high_c is not configured"
+    neither = run(sqlite_store, cfg=all_limits_config(inlet_approach_margin_c=None,
+                                                      inlet_approach_horizon_minutes=None), asset_id="A1")
+    assert "TH_APPROACHING_INLET_LIMIT" in {r.rule_id for r in neither.rules_not_evaluated}
+
+
+# 13. light load ------------------------------------------------------------------------------------
+
+def test_light_load_is_the_headline_when_nothing_is_wrong(sqlite_store):
+    seed(sqlite_store, series("A1", MINUTES, cpu_utilization=20.0))
+    s = run(sqlite_store, asset_id="A1")
+    assert (s.state, s.severity) == ("LIGHT_LOAD", "INFO") and s.light_load_assets == ["A1"]
+    f = next(x for x in s.findings if x.rule_id == "WL_LIGHT_LOAD")
+    assert f.evidence == {"cpu_mean": 20.0, "cpu_threshold": 30}
+
+
+def test_light_load_never_hides_a_problem(sqlite_store):
+    seed(sqlite_store, series("A1", MINUTES, cpu_utilization=20.0, inlet_temperature_c=28.0))
+    s = run(sqlite_store, asset_id="A1")
+    assert s.state == "HIGH_THERMAL_LOAD" and "WL_LIGHT_LOAD" in rule_ids(s)
+
+
+def test_light_load_uses_the_window_mean_not_one_reading(sqlite_store):
+    seed(sqlite_store, series("A1", MINUTES, cpu_utilization=lambda m: 10.0 if m == 14 else 60.0))
+    assert "WL_LIGHT_LOAD" not in rule_ids(run(sqlite_store, asset_id="A1"))     # latest is low, mean is not
+
+
+def test_gpu_servers_need_both_cpu_and_gpu_below(sqlite_store):
+    seed(sqlite_store, [event("BUSY", m, asset_type="GPU", cpu_utilization=20.0, gpu_utilization=60.0) for m in MINUTES])
+    seed(sqlite_store, [event("IDLE", m, asset_type="GPU", cpu_utilization=20.0, gpu_utilization=10.0) for m in MINUTES])
+    assert "WL_LIGHT_LOAD" not in rule_ids(run(sqlite_store, asset_id="BUSY"))
+    idle = run(sqlite_store, asset_id="IDLE")
+    assert idle.state == "LIGHT_LOAD" and idle.findings[-1].evidence["gpu_mean"] == 10.0
+
+
+def test_light_load_not_evaluated_without_threshold_or_data(sqlite_store):
+    seed(sqlite_store, [event("G1", m, asset_type="GPU", cpu_utilization=20.0) for m in MINUTES])
+    s = run(sqlite_store, cfg=all_limits_config(light_load_gpu_utilization_pct=None), asset_id="G1")
+    assert {r.rule_id: r.reason for r in s.rules_not_evaluated}["WL_LIGHT_LOAD"].startswith("GPU server")
+    seed(sqlite_store, series("FEW", [12, 13, 14], cpu_utilization=5.0))
+    few = run(sqlite_store, asset_id="FEW")
+    assert "WL_LIGHT_LOAD" in {r.rule_id for r in few.rules_not_evaluated}
+
+
+def test_data_center_is_light_only_if_every_asset_is(sqlite_store):
+    seed(sqlite_store, series("IDLE", MINUTES, cpu_utilization=10.0))
+    seed(sqlite_store, series("BUSY", MINUTES, cpu_utilization=70.0))
+    mixed = run(sqlite_store)
+    assert mixed.state == "NORMAL" and mixed.light_load_assets == ["IDLE"]
+    assert {a.asset_id: a.state for a in mixed.assets} == {"IDLE": "LIGHT_LOAD", "BUSY": "NORMAL"}
+    seed(sqlite_store, series("BUSY", MINUTES, cpu_utilization=70.0))   # (re-seeding is a no-op duplicate)
+    seed(sqlite_store, [event("IDLE2", m, cpu_utilization=5.0) for m in MINUTES])
+    only_idle = run(sqlite_store, cfg=all_limits_config(light_load_cpu_utilization_pct=80))
+    assert only_idle.state == "LIGHT_LOAD" and only_idle.light_load_assets == ["BUSY", "IDLE", "IDLE2"]

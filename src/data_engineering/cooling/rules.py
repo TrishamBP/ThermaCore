@@ -10,10 +10,13 @@ Overall state (deterministic precedence):
   1. INSUFFICIENT_DATA if a DQ_NO_READINGS finding exists (asset scope) or no asset has
      usable readings (data-center scope);
   2. otherwise the state of the most severe finding (CRITICAL > WARNING); ties are broken by
-     HIGH_THERMAL_LOAD > RAPID_TEMPERATURE_RISE > POTENTIAL_AIRFLOW_ISSUE > DATA_QUALITY_ISSUE;
-  3. no WARNING/CRITICAL finding: PARTIALLY_ASSESSED if any thermal/airflow rule could not be
-     evaluated (unset limit or too few readings), else NORMAL.
-INFO findings (e.g. workload direction) never change the state.
+     HIGH_THERMAL_LOAD > RAPID_TEMPERATURE_RISE > APPROACHING_THERMAL_LIMIT >
+     POTENTIAL_AIRFLOW_ISSUE > DATA_QUALITY_ISSUE;
+  3. no WARNING/CRITICAL finding: LIGHT_LOAD if the light-load rule fired (at data-center scope:
+     only if every assessed asset is lightly loaded); else PARTIALLY_ASSESSED if any rule could
+     not be evaluated (unset threshold or too few readings); else NORMAL.
+Other INFO findings (e.g. workload direction) never change the state. LIGHT_LOAD never hides a
+problem: any WARNING/CRITICAL finding outranks it, and rules_not_evaluated is still reported.
 """
 
 from data_engineering.cooling.config import CoolingConfig
@@ -21,8 +24,8 @@ from data_engineering.cooling.metrics import PreparedSeries
 from data_engineering.cooling.models import Finding, MetricSeries, RuleNotEvaluated
 
 SEVERITY_RANK = {"INFO": 0, "WARNING": 1, "CRITICAL": 2}
-STATE_TIEBREAK = ["HIGH_THERMAL_LOAD", "RAPID_TEMPERATURE_RISE", "POTENTIAL_AIRFLOW_ISSUE",
-                  "DATA_QUALITY_ISSUE", "PARTIALLY_ASSESSED", "NORMAL"]
+STATE_TIEBREAK = ["HIGH_THERMAL_LOAD", "RAPID_TEMPERATURE_RISE", "APPROACHING_THERMAL_LIMIT",
+                  "POTENTIAL_AIRFLOW_ISSUE", "DATA_QUALITY_ISSUE", "LIGHT_LOAD", "PARTIALLY_ASSESSED", "NORMAL"]
 NOT_A_FAULT = "Rule-based inference from telemetry; not a confirmed hardware fault."
 
 
@@ -155,6 +158,42 @@ def condition_findings(metrics: dict[str, MetricSeries], config: CoolingConfig,
                 rate_c_per_minute=_r(rate), threshold_c_per_minute=limit, latest=_r(inlet.latest),
                 change_over_window=_r(inlet.change), elapsed_minutes=_r(inlet.change_elapsed_minutes, 2))
 
+    # --- approaching the inlet limit: within a margin (observation) or projected (inference) ---
+    limit = lim.inlet_temperature_high_c
+    margin, horizon = lim.inlet_approach_margin_c, lim.inlet_approach_horizon_minutes
+    if limit is None:
+        skip("TH_APPROACHING_INLET_LIMIT", "limits.inlet_temperature_high_c is not configured")
+    elif margin is None and horizon is None:
+        skip("TH_APPROACHING_INLET_LIMIT", "neither limits.inlet_approach_margin_c nor "
+                                          "limits.inlet_approach_horizon_minutes is configured")
+    elif inlet.latest is None:
+        skip("TH_APPROACHING_INLET_LIMIT", "no observed inlet temperature in the window")
+    elif inlet.latest < limit:            # at/above the limit is TH_INLET_ABOVE_LIMIT, not 'approaching'
+        headroom = limit - inlet.latest
+        # Current rate: the recent sub-window rate, else the whole-window trend.
+        rate = inlet.recent_rate_per_minute if inlet.recent_rate_per_minute is not None else inlet.trend_per_minute
+        minutes_to_limit = headroom / rate if rate is not None and rate > 0 else None
+        by_margin = margin is not None and headroom <= margin
+        by_projection = horizon is not None and minutes_to_limit is not None and minutes_to_limit <= horizon
+        if horizon is not None and rate is None and not by_margin:
+            skip("TH_APPROACHING_INLET_LIMIT", "projection unavailable (too few inlet readings) and the margin "
+                                              "condition does not hold")
+        if by_margin or by_projection:
+            triggers = [t for t, on in (("margin", by_margin), ("projection", by_projection)) if on]
+            parts = []
+            if by_margin:
+                parts.append(f"inlet {inlet.latest:.2f} deg C is within {margin} deg C of the {limit} deg C limit")
+            if by_projection:
+                parts.append(f"at the current rate of {rate:.3f} deg C/min it would reach the limit in about "
+                             f"{minutes_to_limit:.1f} min (horizon {horizon} min)")
+            add("TH_APPROACHING_INLET_LIMIT", "APPROACHING_THERMAL_LIMIT", "WARNING",
+                "inference" if by_projection else "observation",
+                "Approaching the inlet temperature limit: " + "; ".join(parts) + "."
+                + (" The projection assumes the current rate continues; it is not a forecast." if by_projection else ""),
+                triggers=triggers, latest=_r(inlet.latest), limit=limit, headroom_c=_r(headroom),
+                margin_c=margin, rate_c_per_minute=_r(rate), minutes_to_limit=_r(minutes_to_limit, 1),
+                horizon_minutes=horizon)
+
     # --- airflow (inferences; never a confirmed fault) ---
     frac = lim.airflow_drop_fraction
     if frac is None:
@@ -185,6 +224,37 @@ def condition_findings(metrics: dict[str, MetricSeries], config: CoolingConfig,
     return findings, skipped
 
 
+def light_load_finding(metrics: dict[str, MetricSeries], config: CoolingConfig,
+                       asset_id: str | None) -> tuple[Finding | None, RuleNotEvaluated | None]:
+    """WL_LIGHT_LOAD: window-mean CPU below its threshold; on GPU servers GPU must be below too."""
+    lim = config.limits
+    cpu, gpu = metrics["cpu_utilization"], metrics["gpu_utilization"]
+
+    def skip(reason):
+        return None, RuleNotEvaluated(rule_id="WL_LIGHT_LOAD", reason=reason, asset_id=asset_id)
+
+    if lim.light_load_cpu_utilization_pct is None:
+        return skip("limits.light_load_cpu_utilization_pct is not configured")
+    if not cpu.sufficient_points or cpu.mean is None:
+        return skip(f"cpu_utilization has too few readings (needs >= {config.min_points})")
+    evidence = {"cpu_mean": _r(cpu.mean), "cpu_threshold": lim.light_load_cpu_utilization_pct}
+    light = cpu.mean < lim.light_load_cpu_utilization_pct
+    if gpu.applicable:
+        if lim.light_load_gpu_utilization_pct is None:
+            return skip("GPU server: limits.light_load_gpu_utilization_pct is not configured")
+        if not gpu.sufficient_points or gpu.mean is None:
+            return skip(f"gpu_utilization has too few readings (needs >= {config.min_points})")
+        evidence.update(gpu_mean=_r(gpu.mean), gpu_threshold=lim.light_load_gpu_utilization_pct)
+        light = light and gpu.mean < lim.light_load_gpu_utilization_pct
+    if not light:
+        return None, None
+    what = "CPU" + (" and GPU" if gpu.applicable else "")
+    return Finding(rule_id="WL_LIGHT_LOAD", state="LIGHT_LOAD", severity="INFO", kind="observation",
+                   asset_id=asset_id, evidence=evidence,
+                   explanation=f"Light load: {config.window_minutes}-minute mean {what} utilization below the "
+                               "configured threshold."), None
+
+
 def workload_direction(metrics: dict[str, MetricSeries]) -> str:
     """Combine available workload metrics: agreeing non-stable directions win, disagreement is 'mixed'."""
     directions = [metrics[m].direction for m in ("cpu_utilization", "gpu_utilization", "workload_intensity")
@@ -209,7 +279,7 @@ def workload_finding(direction: str, metrics: dict[str, MetricSeries], asset_id:
 
 
 def classify(findings: list[Finding], not_evaluated: list[RuleNotEvaluated],
-             insufficient: bool = False) -> tuple[str, str]:
+             insufficient: bool = False, light_load: bool | None = None) -> tuple[str, str]:
     """(state, severity) by the precedence documented at the top of this module."""
     if insufficient:
         return "INSUFFICIENT_DATA", "WARNING"
@@ -223,6 +293,10 @@ def classify(findings: list[Finding], not_evaluated: list[RuleNotEvaluated],
         state = min(candidates, key=STATE_TIEBREAK.index)
         severity = "CRITICAL" if top == 2 else "WARNING"
         return state, severity
+    if light_load is None:                 # asset scope: the asset's own light-load finding
+        light_load = any(f.rule_id == "WL_LIGHT_LOAD" for f in findings)
+    if light_load:
+        return "LIGHT_LOAD", "INFO"
     if not_evaluated:
         return "PARTIALLY_ASSESSED", "INFO"
     return "NORMAL", "INFO"

@@ -20,7 +20,8 @@ class PostgresTelemetryStore(SqlTelemetryStore):
     placeholder = "%s"
     schema_file = SCHEMA_DIR / "telemetry_store_postgres.sql"
 
-    def __init__(self, url: str, search_path: str | None = None, connect_timeout_s: int = 10) -> None:
+    def __init__(self, url: str, search_path: str | None = None, connect_timeout_s: int = 10,
+                 read_only: bool = False, query_timeout_s: float | None = None) -> None:
         try:
             import psycopg
         except ImportError as exc:
@@ -29,6 +30,7 @@ class PostgresTelemetryStore(SqlTelemetryStore):
         self.url = url
         self.search_path = search_path
         self.connect_timeout_s = connect_timeout_s
+        self.read_only, self.query_timeout_s = read_only, query_timeout_s
         super().__init__()
 
     def describe(self) -> str:
@@ -37,8 +39,15 @@ class PostgresTelemetryStore(SqlTelemetryStore):
 
     def _connect(self):
         kwargs = {"autocommit": True, "connect_timeout": self.connect_timeout_s}
+        options = []
         if self.search_path:
-            kwargs["options"] = f"-c search_path={self.search_path}"
+            options.append(f"-c search_path={self.search_path}")
+        if self.query_timeout_s:
+            options.append(f"-c statement_timeout={int(self.query_timeout_s * 1000)}")
+        if self.read_only:
+            options.append("-c default_transaction_read_only=on")
+        if options:
+            kwargs["options"] = " ".join(options)
         return self._psycopg.connect(self.url, **kwargs)
 
     def is_transient(self, exc: BaseException) -> bool:

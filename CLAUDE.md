@@ -7,8 +7,13 @@ A platform that ingests hyperscale data center operational data, streams it thro
 - The **Kafka producer**: topic `datacenter.telemetry`.
 - The **Kafka consumer** and storage layer: SQLite/PostgreSQL telemetry store, dead-letter topic `datacenter.telemetry.dlq`, Parquet history, DuckDB analytics.
 - The **Cooling State Estimator** (`src/data_engineering/cooling/`): deterministic, read-only, rules-based. Served at `GET /api/v1/telemetry/cooling-state` by the `app` package (FastAPI).
+- The **cooling response model** (`src/data_engineering/cooling_model/`): an XGBoost inlet forecaster (5/10 min) plus a recommendation-only optimizer. API domain `src/app/cooling/` (`/api/v1/cooling-model/*`, `/api/v1/cooling-optimizer/recommend`). Labelled `forecasting_baseline`: the data shows no fan→inlet response and no cooling power, so the optimizer returns UNAVAILABLE. See `docs/cooling_model_report.md`.
 
-**Not built:** other API endpoints, SSE, dashboard, diagnostic agents, anomaly detector, cooling optimization or control, model training. Don't start those until the user asks. README.md is the detailed guide (Part II covers the consumer).
+- **Platform APIs** (`src/app/{dashboard,assets,cooling,recommendations,copilot,digital_twin}`): see `docs/API.md`, `docs/AGENT_ARCHITECTURE.md` and `docs/DIGITAL_TWIN.md`.
+- **Multi-agent recommendations** (`src/data_engineering/recommendations/`, LangGraph + Fireworks GLM main / DeepSeek subagents) and the **copilot** (`src/data_engineering/copilot/`). Both share `recommendations/specialists.py`; the validator is plain Python.
+- **Digital twin** backend with a DEMONSTRATION layout (`config/digital_twin_layout.yaml`) and SSE.
+
+**Not built:** frontend, any equipment control (never build one without an explicit, safety-reviewed request). Don't start those until the user asks. README.md is the entry point; `docs/PIPELINE_GUIDE.md` is the detailed pipeline guide (Part II covers the consumer).
 
 ## Data source
 
@@ -65,10 +70,24 @@ API structure (`src/app/`, package `app`; the pipeline stays in `data_engineerin
 - Handlers that touch the database are sync `def`, never `async def`.
 
 Cooling estimator rules:
-- Thresholds live in `config/cooling_state.yaml`. **All equipment limits ship unset (null)**: never invent them. An unset limit makes the rule "not evaluated" and the state `PARTIALLY_ASSESSED`, never `NORMAL`.
+- Thresholds live in `config/cooling_state.yaml`. Five are user-approved **reference starter values**, marked as such (inlet limit 27 °C from ASHRAE recommended, approach margin 2 °C and horizon 15 min, light load below 30 % CPU and 30 % GPU). All others stay null. Never invent equipment limits. An unset threshold makes the rule "not evaluated".
+- States, in precedence order: INSUFFICIENT_DATA; then HIGH_THERMAL_LOAD > RAPID_TEMPERATURE_RISE > APPROACHING_THERMAL_LIMIT > POTENTIAL_AIRFLOW_ISSUE > DATA_QUALITY_ISSUE; then LIGHT_LOAD (INFO; data-center scope only if every asset is light); then PARTIALLY_ASSESSED; then NORMAL.
 - Measurements that don't exist in the telemetry: cooling efficiency, power-supply efficiency, WUE, cooling power. Report them as unavailable.
 - GPU utilization of non-GPU assets is a structural 0, so it's "not applicable", not a value.
 - Scope every evaluation to one `simulation_run_id`. Never mix assets in one series.
+
+Agent / API rules:
+- LLM output schemas carry no numbers; free text is number-checked against evidence; failures fall back to deterministic output and are labelled. Tests use scripted fake LLMs (`tests/recommendation_helpers.ScriptedLLM`), never Fireworks.
+- Copilot and twin reads use read-only store connections (`open_store(read_only=True, query_timeout_s=...)`); enforce `AssetScope` on every asset access.
+- Use structured output with `method="function_calling"` and `reasoning_effort=low`. GLM `json_schema` mode and the 4096-token default produced no tool call. ChatFireworks base URL must not end in /v1.
+- The twin layout is a demonstration; never present it as a real facility.
+- Energy waste = fan over-speed vs comparable peers (`energy/fan_peer.py`, same cooling_type + asset_type, matched workload/inlet). Relative only (no kW, `estimated_energy_impact` stays null); the action is investigate, never lower the fan.
+
+Cooling model rules:
+- Use one run per simulator seed for training; same-seed runs replay identical series (leakage).
+- Never feed hypothetical settings into a `forecasting_baseline` model. Counterfactuals need `intervention_validated` (validity.py step-response check) and stay inside the training support range.
+- `power_consumption_kw` is server IT power, never cooling power. `optimizer.t_safe_c` and the actuator bounds stay null until the user supplies them.
+- Report pooled skill against persistence, not R² on levels (persistence scores the same).
 
 ## Skills (`.claude/skills/`)
 
@@ -125,6 +144,7 @@ uv run python -m data_engineering.analytics.query_telemetry overview        # Du
 docker compose --profile postgres up -d --wait postgres          # optional PostgreSQL (needs POSTGRES_PASSWORD)
 uv run uvicorn app.main:app --host 127.0.0.1 --port 8000          # API: /api/v1/telemetry/cooling-state, /docs
 uv run python -m data_engineering.cooling.estimator --asset SIM-NA-001       # snapshot as JSON (CLI)
+uv run python -m data_engineering.cooling_model.training     # train + activate the XGBoost forecaster
 uv run pytest                                                    # unit tests, no broker needed
 TELEMETRY_TEST_POSTGRES_URL=postgresql://... uv run pytest -m postgres   # store tests on PostgreSQL
 uv run pytest -m integration                                     # needs the local broker
