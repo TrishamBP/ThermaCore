@@ -1,0 +1,47 @@
+# Cooling State Estimator configuration (read-only analysis; it never changes cooling settings).
+# Override the file location with COOLING_STATE_CONFIG=<path>.
+#
+# Two kinds of settings:
+#   1. Analysis parameters (window, freshness, data-quality tolerances, trend sensitivity).
+#      These have working defaults; they describe how to read the data, not what is safe.
+#   2. limits: site/equipment limits. NONE are set by default: the dataset and this project
+#      provide no equipment specifications. A rule whose limit is null is NOT evaluated and is
+#      listed under `rules_not_evaluated`; the state is then never reported as plain NORMAL.
+
+window_minutes: 15                 # rolling history ending at the newest reading (event time)
+recent_minutes: 5                  # sub-window for the "recent rate of change"
+expected_interval_seconds: 60      # nominal spacing between readings (the producer's default)
+gap_tolerance_factor: 1.5          # an interval > 1.5 x expected counts as a gap
+min_points: 5                      # observed readings needed for trend/statistics of a metric
+min_coverage: 0.8                  # observed readings / expected readings below this -> data-quality finding
+max_missing_fraction: 0.2          # share of explicitly missing readings above this -> data-quality finding
+stale_after_seconds: 300           # asset's newest reading older than the evaluation time by more than this (event time)
+max_ingest_age_seconds: 300        # newest ingested row older than this (wall clock) -> pipeline not delivering
+
+# Smallest change over the whole window that counts as a trend (increasing/decreasing);
+# smaller changes are "stable". Analysis sensitivity in each metric's own unit, not a limit.
+trend_min_change:
+  inlet_temperature_c: 0.5
+  exhaust_temperature_c: 0.5
+  temperature_delta_c: 0.5
+  cpu_utilization: 5.0
+  gpu_utilization: 5.0
+  workload_intensity: 0.05
+  fan_speed_rpm: 100.0
+  airflow_cfm: 5.0
+  power_consumption_kw: 5.0
+  pue: 0.01
+
+limits:
+  # Server inlet temperature, deg C. Reference only: ASHRAE TC 9.9 thermal guidelines give a
+  # *recommended* inlet envelope of 18-27 deg C for IT equipment classes A1-A4. Confirm against
+  # your equipment's specifications before setting.
+  inlet_temperature_high_c: null
+  inlet_temperature_critical_c: null      # must be >= inlet_temperature_high_c when both are set
+  exhaust_temperature_high_c: null        # deg C
+  temperature_delta_high_c: null          # exhaust - inlet, deg C
+  sustained_inlet_rise_c_per_minute: null # least-squares inlet trend over the whole window
+  rapid_inlet_rise_c_per_minute: null     # least-squares inlet trend over the last recent_minutes
+  # Potential airflow issue (heuristics; a finding is NOT a confirmed fault):
+  airflow_drop_fraction: null             # e.g. 0.10: airflow fell >= 10% over the window while inlet temperature rose
+  fan_airflow_divergence_fraction: null   # e.g. 0.10: fan speed rose >= 10% while airflow did not rise

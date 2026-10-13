@@ -1,0 +1,73 @@
+# Phase 1 scenario and simulation settings. No secrets belong in this file.
+#
+# Everything the simulator produces is SYNTHETIC (provenance = 'synthetic'). The source
+# dataset has no timestamps and no equipment identifiers (see docs/dataset/README.md), so
+# all temporal behaviour and all asset IDs below are simulation constructs.
+
+scenario:
+  # Matched exactly against the observed `datacenter_region` values (APAC, EU, ME, NA).
+  # The dataset does not define its region codes; "NA" = North America is inferred from
+  # the naming convention alongside APAC / EU / ME. Do not read the CSV with tools that
+  # convert "NA" to null (e.g. pandas' default keep_default_na=True).
+  region_code: "NA"
+  region_label: "North America"
+
+simulation:
+  seed: 42
+  start_ts_utc: "2026-01-01T00:00:00Z"   # must be UTC, ISO-8601 with trailing Z
+  duration_minutes: 1440                  # 24 hours
+  frequency_seconds: 60                   # one reading per minute -> 1,440 slots per asset
+  asset_count: 20                         # each asset is seeded from one distinct NA source row
+  missing_rate: 0.01                      # probability that a whole slot has no reading
+
+  # Workload: the asset's source workload_intensity plus smooth variation.
+  # ASSUMPTION: the dataset shows no workload difference between its time_of_day buckets
+  # (mean 0.55 in Night/Off-Peak/Peak), so the diurnal shape is not learned from data.
+  workload:
+    diurnal_amplitude: 0.10               # +/- workload_intensity units around the baseline
+    diurnal_peak_hour_utc: 14
+    regime_changes_per_hour: 0.5          # mean rate of workload level changes (job start/stop)
+    regime_max_shift: 0.15                # max level change, workload_intensity units
+    regime_smoothing_minutes: 15          # time constant for moving to a new level
+
+  # Per-metric noise: AR(1) with this autocorrelation per slot. Stationary std is
+  # noise_fraction x the residual std of that metric (vs. its driver) across NA rows of the
+  # same server_type. ASSUMPTION: within-asset minute-to-minute variability is not in the data.
+  noise:
+    ar_phi: 0.97
+    noise_fraction: 0.10
+
+  # Each metric = baseline + slope x (driver - driver_baseline) + noise, with slope fitted by
+  # least squares on NA rows of the asset's server_type. Default driver: workload_intensity.
+  # Clean values are clipped to the min/max observed in those rows (empirical source range,
+  # not physical operating limits).
+  drivers:
+    airflow_cfm: fan_speed_rpm             # source corr +0.995
+    disk_io_iops: storage_utilization      # source corr +0.86
+
+anomalies:
+  # Magnitudes are in standard deviations of the metric across NA rows of the asset's
+  # server_type. Injected values are NOT clipped to the source range.
+  events:
+    - type: thermal_rise
+      count: 3
+      metrics: [inlet_temperature_c, exhaust_temperature_c]
+      magnitude_std: 3.0
+      shape: ramp
+      duration_minutes: [20, 60]
+    - type: power_spike
+      count: 3
+      metrics: [power_consumption_kw]
+      magnitude_std: 4.0
+      shape: step
+      duration_minutes: [3, 15]
+    - type: network_latency_spike
+      count: 3
+      metrics: [network_latency_ms]
+      magnitude_std: 4.0
+      shape: step
+      duration_minutes: [5, 20]
+
+# Kafka publishing (not part of the simulation run_id hash).
+streaming:
+  data_center_id: "dc-na-sim-001"   # the single hypothetical North American data center

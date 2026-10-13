@@ -1,0 +1,1198 @@
+{
+  "dataset_dir": "data/raw/hyperscale-data-center-dataset",
+  "profiled_at": "2026-10-13T06:13:13.588956+00:00",
+  "files": {
+    "correlation_matrix.csv": {
+      "rows_profiled": 27,
+      "truncated": false,
+      "columns": {
+        "": {
+          "inferred_type": "string",
+          "type_counts": {
+            "string": 27
+          },
+          "nulls": 0,
+          "null_pct": 0.0,
+          "distinct": 27,
+          "samples": [
+            "server_age_years",
+            "rack_u_position",
+            "workload_intensity",
+            "cpu_utilization",
+            "gpu_utilization"
+          ]
+        },
+        "server_age_years": {
+          "inferred_type": "float",
+          "type_counts": {
+            "float": 27
+          },
+          "nulls": 0,
+          "null_pct": 0.0,
+          "distinct": 27,
+          "samples": [
+            "1.0",
+            "-0.0015659940084910286",
+            "-0.0002262771447382494",
+            "-0.0008622610900686479",
+            "-0.3646691509857345"
+          ],
+          "min": -0.999999999999997,
+          "max": 1.0
+        },
+        "rack_u_position": {
+          "inferred_type": "float",
+          "type_counts": {
+            "float": 27
+          },
+          "nulls": 0,
+          "null_pct": 0.0,
+          "distinct": 27,
+          "samples": [
+            "-0.0015659940084910286",
+            "1.0",
+            "-0.0002408802536622788",
+            "-0.0015290801703832335",
+            "0.0015394369928192798"
+          ],
+          "min": -0.003895481012397123,
+          "max": 1.0
+        },
+        "workload_intensity": {
+          "inferred_type": "float",
+          "type_counts": {
+            "float": 27
+          },
+          "nulls": 0,
+          "null_pct": 0.0,
+          "distinct": 27,
+          "samples": [
+            "-0.0002262771447382494",
+            "-0.0002408802536622788",
+            "1.0",
+            "0.9671215692028373",
+            "0.21071577365264035"
+          ],
+          "min": -0.002320031745239635,
+          "max": 1.0
+        },
+        "cpu_utilization": {
+          "inferred_type": "float",
+          "type_counts": {
+            "float": 27
+          },
+          "nulls": 0,
+          "null_pct": 0.0,
+          "distinct": 27,
+          "samples": [
+            "-0.0008622610900686479",
+            "-0.0015290801703832335",
+            "0.9671215692028373",
+            "1.0",
+            "0.2180340205213373"
+          ],
+          "min": -0.0022348413584938115,
+          "max": 1.0
+        },
+        "gpu_utilization": {
+          "inferred_type": "float",
+          "type_counts": {
+            "float": 27
+          },
+          "nulls": 0,
+          "null_pct": 0.0,
+          "distinct": 27,
+          "samples": [
+            "-0.3646691509857345",
+            "0.0015394369928192798",
+            "0.21071577365264035",
+            "0.2180340205213373",
+            "1.0"
+          ],
+          "min": -0.3646691509857345,
+          "max": 1.0
+        },
+        "memory_utilization": {
+          "inferred_type": "float",
+          "type_counts": {
+            "float": 27
+          },
+          "nulls": 0,
+          "null_pct": 0.0,
+          "distinct": 27,
+          "samples": [
+            "-0.0014414813133098547",
+            "-0.0018162415993753993",
+            "0.6121340787826189",
+            "0.5916975910496078",
+            "0.13077679562834105"
+          ],
+          "min": -0.005468810703078419,
+          "max": 1.0
+        },
+        "storage_utilization": {
+          "inferred_type": "float",
+          "type_counts": {
+            "float": 27
+          },
+          "nulls": 0,
+          "null_pct": 0.0,
+          "distinct": 27,
+          "samples": [
+            "-0.030053024459711815",
+            "-0.0016635840084945521",
+            "-0.001789123167961815",
+            "-0.0022348413584938115",
+            "-0.2355379636822308"
+          ],
+          "min": -0.3200003354529598,
+          "max": 1.0
+        },
+        "disk_io_iops": {
+          "inferred_type": "float",
+          "type_counts": {
+            "float": 27
+          },
+          "nulls": 0,
+          "null_pct": 0.0,
+          "distinct": 27,
+          "samples": [
+            "-0.026042966608361397",
+            "-0.0015563447458313742",
+            "0.5055151621359418",
+            "0.48845989809197143",
+            "-0.09638280072099012"
+          ],
+          "min": -0.2743520405598781,
+          "max": 1.0
+        },
+        "network_throughput_gbps": {
+          "inferred_type": "float",
+          "type_counts": {
+            "float": 27
+          },
+          "nulls": 0,
+          "null_pct": 0.0,
+          "distinct": 27,
+          "samples": [
+            "-0.0021931190282738124",
+            "-0.0027952476361912983",
+            "0.34294907189017365",
+            "0.3311578434488418",
+            "0.0737974527419408"
+          ],
+          "min": -0.0039388818393165746,
+          "max": 1.0
+        },
+        "network_latency_ms": {
+          "inferred_type": "float",
+          "type_counts": {
+            "float": 27
+          },
+          "nulls": 0,
+          "null_pct": 0.0,
+          "distinct": 27,
+          "samples": [
+            "0.016769786569121085",
+            "-0.001987608950672847",
+            "0.0015142775097789628",
+            "0.00026349071482139897",
+            "0.12794796599178979"
+          ],
+          "min": -0.06989321950063937,
+          "max": 1.0
+        },
+        "virtual_machines_count": {
+          "inferred_type": "float",
+          "type_counts": {
+            "float": 27
+          },
+          "nulls": 0,
+          "null_pct": 0.0,
+          "distinct": 27,
+          "samples": [
+            "0.36054994485215525",
+            "0.0004889472519299131",
+            "0.003445526603496906",
+            "0.0019749833512350194",
+            "-0.35650049309816906"
+          ],
+          "min": -0.3605499448521556,
+          "max": 1.0
+        },
+        "ambient_temperature_c": {
+          "inferred_type": "float",
+          "type_counts": {
+            "float": 27
+          },
+          "nulls": 0,
+          "null_pct": 0.0,
+          "distinct": 27,
+          "samples": [
+            "0.34906024831235716",
+            "0.0016213481384562806",
+            "0.0023810426547729887",
+            "0.001584881671539047",
+            "-0.21800521663453565"
+          ],
+          "min": -0.7207921152380197,
+          "max": 1.0
+        },
+        "humidity_percentage": {
+          "inferred_type": "float",
+          "type_counts": {
+            "float": 27
+          },
+          "nulls": 0,
+          "null_pct": 0.0,
+          "distinct": 27,
+          "samples": [
+            "0.39184044589715167",
+            "-0.002724084150324696",
+            "0.005732507838698737",
+            "0.0054731253445095525",
+            "-0.16759232125835505"
+          ],
+          "min": -0.46965871582645174,
+          "max": 1.0
+        },
+        "inlet_temperature_c": {
+          "inferred_type": "float",
+          "type_counts": {
+            "float": 27
+          },
+          "nulls": 0,
+          "null_pct": 0.0,
+          "distinct": 27,
+          "samples": [
+            "0.8573391110820251",
+            "-0.00015145684247616886",
+            "0.0011569436292263068",
+            "0.00029639727840330855",
+            "-0.3624752552150985"
+          ],
+          "min": -0.8573391110820322,
+          "max": 1.0
+        },
+        "exhaust_temperature_c": {
+          "inferred_type": "float",
+          "type_counts": {
+            "float": 27
+          },
+          "nulls": 0,
+          "null_pct": 0.0,
+          "distinct": 27,
+          "samples": [
+            "0.096200769423567",
+            "0.0004363076000035619",
+            "0.4976657928139354",
+            "0.5140060208371771",
+            "0.6256043334894849"
+          ],
+          "min": -0.17451432944200093,
+          "max": 1.0
+        },
+        "fan_speed_rpm": {
+          "inferred_type": "float",
+          "type_counts": {
+            "float": 27
+          },
+          "nulls": 0,
+          "null_pct": 0.0,
+          "distinct": 27,
+          "samples": [
+            "0.4793866629771806",
+            "-0.0018712852705562138",
+            "0.21593703816648296",
+            "0.22333541347497546",
+            "-0.18322643051215476"
+          ],
+          "min": -0.8497963049595545,
+          "max": 1.0
+        },
+        "airflow_cfm": {
+          "inferred_type": "float",
+          "type_counts": {
+            "float": 27
+          },
+          "nulls": 0,
+          "null_pct": 0.0,
+          "distinct": 27,
+          "samples": [
+            "0.47651596330963447",
+            "-0.001901213023887202",
+            "0.21539865072842768",
+            "0.22272864140565146",
+            "-0.18243023386612994"
+          ],
+          "min": -0.8453174033821187,
+          "max": 1.0
+        },
+        "cooling_efficiency": {
+          "inferred_type": "float",
+          "type_counts": {
+            "float": 27
+          },
+          "nulls": 0,
+          "null_pct": 0.0,
+          "distinct": 27,
+          "samples": [
+            "-0.8009761010208893",
+            "0.0034073482022371126",
+            "-0.0015734494014454478",
+            "-0.0010640441021350473",
+            "0.3483958966885523"
+          ],
+          "min": -0.9604395568169084,
+          "max": 1.0
+        },
+        "power_supply_efficiency": {
+          "inferred_type": "float",
+          "type_counts": {
+            "float": 27
+          },
+          "nulls": 0,
+          "null_pct": 0.0,
+          "distinct": 27,
+          "samples": [
+            "-0.999999999999997",
+            "0.0015659940084916436",
+            "0.00022627714473802082",
+            "0.0008622610900685325",
+            "0.3646691509857273"
+          ],
+          "min": -0.999999999999997,
+          "max": 1.0
+        },
+        "ups_battery_health": {
+          "inferred_type": "float",
+          "type_counts": {
+            "float": 27
+          },
+          "nulls": 0,
+          "null_pct": 0.0,
+          "distinct": 27,
+          "samples": [
+            "-0.9255998098145337",
+            "0.0021397580722899772",
+            "0.001022269608750856",
+            "0.001451996524057718",
+            "0.3366674865418991"
+          ],
+          "min": -0.9255998098145337,
+          "max": 1.0
+        },
+        "power_consumption_kw": {
+          "inferred_type": "float",
+          "type_counts": {
+            "float": 27
+          },
+          "nulls": 0,
+          "null_pct": 0.0,
+          "distinct": 27,
+          "samples": [
+            "-0.25421259863399753",
+            "-0.0005939781409561736",
+            "0.227431531435236",
+            "0.23477736137707983",
+            "0.9194481443888192"
+          ],
+          "min": -0.3200003354529598,
+          "max": 1.0
+        },
+        "pue": {
+          "inferred_type": "float",
+          "type_counts": {
+            "float": 27
+          },
+          "nulls": 0,
+          "null_pct": 0.0,
+          "distinct": 27,
+          "samples": [
+            "0.8326507529503737",
+            "-0.003895481012397123",
+            "0.0025062495216338536",
+            "0.0018653132318015655",
+            "-0.30708685150020054"
+          ],
+          "min": -0.9604395568169084,
+          "max": 1.0
+        },
+        "wue": {
+          "inferred_type": "float",
+          "type_counts": {
+            "float": 27
+          },
+          "nulls": 0,
+          "null_pct": 0.0,
+          "distinct": 27,
+          "samples": [
+            "-0.3700921449777871",
+            "0.0036707541698196523",
+            "-0.00021667528401765913",
+            "-0.0005257426116483593",
+            "0.3973068930102134"
+          ],
+          "min": -0.8497963049595545,
+          "max": 1.0
+        },
+        "carbon_intensity_gco2_kwh": {
+          "inferred_type": "float",
+          "type_counts": {
+            "float": 27
+          },
+          "nulls": 0,
+          "null_pct": 0.0,
+          "distinct": 27,
+          "samples": [
+            "0.4893422431780012",
+            "0.001056598944086323",
+            "0.0024323025114733328",
+            "0.0014485983343530567",
+            "-0.320764897825281"
+          ],
+          "min": -0.9102479228612751,
+          "max": 1.0
+        },
+        "renewable_energy_ratio": {
+          "inferred_type": "float",
+          "type_counts": {
+            "float": 27
+          },
+          "nulls": 0,
+          "null_pct": 0.0,
+          "distinct": 27,
+          "samples": [
+            "-0.43394342105848605",
+            "-0.0025796762968423805",
+            "-0.002320031745239635",
+            "-0.0015685796982496316",
+            "0.3029139626175325"
+          ],
+          "min": -0.9102479228612751,
+          "max": 1.0
+        },
+        "carbon_emission_kg": {
+          "inferred_type": "float",
+          "type_counts": {
+            "float": 27
+          },
+          "nulls": 0,
+          "null_pct": 0.0,
+          "distinct": 27,
+          "samples": [
+            "0.37852473154965205",
+            "0.005046092497160667",
+            "0.13529526074660667",
+            "0.13961810459931742",
+            "0.14988331481435402"
+          ],
+          "min": -0.7329323390615995,
+          "max": 1.0
+        },
+        "compute_cost_usd": {
+          "inferred_type": "float",
+          "type_counts": {
+            "float": 27
+          },
+          "nulls": 0,
+          "null_pct": 0.0,
+          "distinct": 27,
+          "samples": [
+            "-0.36257993863758176",
+            "-0.0010654661841914413",
+            "0.1956443333886977",
+            "0.20184432680072448",
+            "0.91708322893089"
+          ],
+          "min": -0.4958231254096674,
+          "max": 1.0
+        }
+      },
+      "timestamp_candidates": [],
+      "repeating_identifier_candidates": [],
+      "unique_per_row_columns": [
+        "",
+        "server_age_years",
+        "rack_u_position",
+        "workload_intensity",
+        "cpu_utilization",
+        "gpu_utilization",
+        "memory_utilization",
+        "storage_utilization",
+        "disk_io_iops",
+        "network_throughput_gbps",
+        "network_latency_ms",
+        "virtual_machines_count",
+        "ambient_temperature_c",
+        "humidity_percentage",
+        "inlet_temperature_c",
+        "exhaust_temperature_c",
+        "fan_speed_rpm",
+        "airflow_cfm",
+        "cooling_efficiency",
+        "power_supply_efficiency",
+        "ups_battery_health",
+        "power_consumption_kw",
+        "pue",
+        "wue",
+        "carbon_intensity_gco2_kwh",
+        "renewable_energy_ratio",
+        "carbon_emission_kg",
+        "compute_cost_usd"
+      ]
+    },
+    "dataset_summary.txt": {
+      "rows_profiled": 13,
+      "truncated": false,
+      "columns": {
+        "Dataset Summary Statistics": {
+          "inferred_type": "string",
+          "type_counts": {
+            "string": 13
+          },
+          "nulls": 0,
+          "null_pct": 0.0,
+          "distinct": 13,
+          "samples": [
+            "==============================",
+            "       server_type cooling_type datacenter_region time_of_day maintenance_status energy_source_primary  server_age_years  rack_u_position  workload_intensity  cpu_utilization  gpu_utilization  memory_utilization  storage_utilization   disk_io_iops  network_throughput_gbps  network_latency_ms  virtual_machines_count  ambient_temperature_c  humidity_percentage  inlet_temperature_c  exhaust_temperature_c  fan_speed_rpm    airflow_cfm  cooling_efficiency  power_supply_efficiency  ups_battery_health  power_consumption_kw            pue            wue  carbon_intensity_gco2_kwh  renewable_energy_ratio  carbon_emission_kg  compute_cost_usd energy_efficiency_class failure_risk_level",
+            "count       100000       100000            100000      100000             100000                100000      100000.00000    100000.000000       100000.000000    100000.000000    100000.000000       100000.000000        100000.000000  100000.000000            100000.000000       100000.000000           100000.000000          100000.000000        100000.000000        100000.000000          100000.000000  100000.000000  100000.000000       100000.000000            100000.000000       100000.000000         100000.000000  100000.000000  100000.000000              100000.000000           100000.000000       100000.000000     100000.000000                  100000             100000",
+            "unique           4            3                 4           3                  3                     4               NaN              NaN                 NaN              NaN              NaN                 NaN                  NaN            NaN                      NaN                 NaN                     NaN                    NaN                  NaN                  NaN                    NaN            NaN            NaN                 NaN                      NaN                 NaN                   NaN            NaN            NaN                        NaN                     NaN                 NaN               NaN                       3                  3",
+            "top        Compute          Air                EU        Peak             Normal                  Grid               NaN              NaN                 NaN              NaN              NaN                 NaN                  NaN            NaN                      NaN                 NaN                     NaN                    NaN                  NaN                  NaN                    NaN            NaN            NaN                 NaN                      NaN                 NaN                   NaN            NaN            NaN                        NaN                     NaN                 NaN               NaN                    High                Low"
+          ]
+        }
+      },
+      "timestamp_candidates": [],
+      "repeating_identifier_candidates": [],
+      "unique_per_row_columns": [
+        "Dataset Summary Statistics"
+      ]
+    },
+    "green_ai_datacenter.csv": {
+      "rows_profiled": 100000,
+      "truncated": false,
+      "columns": {
+        "server_type": {
+          "inferred_type": "string",
+          "type_counts": {
+            "string": 100000
+          },
+          "nulls": 0,
+          "null_pct": 0.0,
+          "distinct": 4,
+          "samples": [
+            "Edge",
+            "GPU",
+            "Compute",
+            "Storage"
+          ]
+        },
+        "cooling_type": {
+          "inferred_type": "string",
+          "type_counts": {
+            "string": 100000
+          },
+          "nulls": 0,
+          "null_pct": 0.0,
+          "distinct": 3,
+          "samples": [
+            "Air",
+            "Liquid",
+            "Hybrid"
+          ]
+        },
+        "datacenter_region": {
+          "inferred_type": "string",
+          "type_counts": {
+            "string": 100000
+          },
+          "nulls": 0,
+          "null_pct": 0.0,
+          "distinct": 4,
+          "samples": [
+            "EU",
+            "ME",
+            "NA",
+            "APAC"
+          ]
+        },
+        "time_of_day": {
+          "inferred_type": "string",
+          "type_counts": {
+            "string": 100000
+          },
+          "nulls": 0,
+          "null_pct": 0.0,
+          "distinct": 3,
+          "samples": [
+            "Night",
+            "Off-Peak",
+            "Peak"
+          ]
+        },
+        "maintenance_status": {
+          "inferred_type": "string",
+          "type_counts": {
+            "string": 100000
+          },
+          "nulls": 0,
+          "null_pct": 0.0,
+          "distinct": 3,
+          "samples": [
+            "Normal",
+            "Recent",
+            "Pending"
+          ]
+        },
+        "energy_source_primary": {
+          "inferred_type": "string",
+          "type_counts": {
+            "string": 100000
+          },
+          "nulls": 0,
+          "null_pct": 0.0,
+          "distinct": 4,
+          "samples": [
+            "Solar",
+            "Grid",
+            "Hydro",
+            "Wind"
+          ]
+        },
+        "server_age_years": {
+          "inferred_type": "int",
+          "type_counts": {
+            "int": 100000
+          },
+          "nulls": 0,
+          "null_pct": 0.0,
+          "distinct": 11,
+          "samples": [
+            "8",
+            "2",
+            "3",
+            "7",
+            "5"
+          ],
+          "min": 1.0,
+          "max": 11.0
+        },
+        "rack_u_position": {
+          "inferred_type": "int",
+          "type_counts": {
+            "int": 100000
+          },
+          "nulls": 0,
+          "null_pct": 0.0,
+          "distinct": 42,
+          "samples": [
+            "38",
+            "17",
+            "1",
+            "39",
+            "24"
+          ],
+          "min": 1.0,
+          "max": 42.0
+        },
+        "workload_intensity": {
+          "inferred_type": "float",
+          "type_counts": {
+            "float": 100000
+          },
+          "nulls": 0,
+          "null_pct": 0.0,
+          "distinct": 901,
+          "samples": [
+            "0.615",
+            "0.295",
+            "0.683",
+            "0.416",
+            "0.278"
+          ],
+          "min": 0.1,
+          "max": 1.0
+        },
+        "cpu_utilization": {
+          "inferred_type": "float",
+          "type_counts": {
+            "float": 100000
+          },
+          "nulls": 0,
+          "null_pct": 0.0,
+          "distinct": ">1000",
+          "samples": [
+            "46.498",
+            "21.285",
+            "52.201",
+            "32.406",
+            "27.067"
+          ],
+          "min": 7.237,
+          "max": 93.719
+        },
+        "gpu_utilization": {
+          "inferred_type": "float",
+          "type_counts": {
+            "float": 100000
+          },
+          "nulls": 0,
+          "null_pct": 0.0,
+          "distinct": ">1000",
+          "samples": [
+            "0.0",
+            "23.863",
+            "29.215",
+            "66.099",
+            "64.036"
+          ],
+          "min": 0.0,
+          "max": 100.0
+        },
+        "memory_utilization": {
+          "inferred_type": "float",
+          "type_counts": {
+            "float": 100000
+          },
+          "nulls": 0,
+          "null_pct": 0.0,
+          "distinct": ">1000",
+          "samples": [
+            "46.29",
+            "48.941",
+            "59.842",
+            "51.514",
+            "49.36"
+          ],
+          "min": 5.0,
+          "max": 98.0
+        },
+        "storage_utilization": {
+          "inferred_type": "float",
+          "type_counts": {
+            "float": 100000
+          },
+          "nulls": 0,
+          "null_pct": 0.0,
+          "distinct": ">1000",
+          "samples": [
+            "10.927",
+            "10.475",
+            "36.355",
+            "35.444",
+            "35.265"
+          ],
+          "min": 10.001,
+          "max": 95.0
+        },
+        "disk_io_iops": {
+          "inferred_type": "float",
+          "type_counts": {
+            "float": 100000
+          },
+          "nulls": 0,
+          "null_pct": 0.0,
+          "distinct": ">1000",
+          "samples": [
+            "4169.378",
+            "2524.692",
+            "7051.538",
+            "5622.991",
+            "4914.087"
+          ],
+          "min": 1513.636,
+          "max": 14461.72
+        },
+        "network_throughput_gbps": {
+          "inferred_type": "float",
+          "type_counts": {
+            "float": 100000
+          },
+          "nulls": 0,
+          "null_pct": 0.0,
+          "distinct": ">1000",
+          "samples": [
+            "12.634",
+            "4.767",
+            "16.457",
+            "14.535",
+            "16.799"
+          ],
+          "min": 1.267,
+          "max": 75.131
+        },
+        "network_latency_ms": {
+          "inferred_type": "float",
+          "type_counts": {
+            "float": 100000
+          },
+          "nulls": 0,
+          "null_pct": 0.0,
+          "distinct": ">1000",
+          "samples": [
+            "24.572",
+            "84.468",
+            "35.308",
+            "39.462",
+            "75.027"
+          ],
+          "min": 5.001,
+          "max": 299.987
+        },
+        "virtual_machines_count": {
+          "inferred_type": "int",
+          "type_counts": {
+            "int": 100000
+          },
+          "nulls": 0,
+          "null_pct": 0.0,
+          "distinct": 90,
+          "samples": [
+            "3",
+            "4",
+            "23",
+            "95",
+            "5"
+          ],
+          "min": 0.0,
+          "max": 99.0
+        },
+        "ambient_temperature_c": {
+          "inferred_type": "float",
+          "type_counts": {
+            "float": 100000
+          },
+          "nulls": 0,
+          "null_pct": 0.0,
+          "distinct": ">1000",
+          "samples": [
+            "4.72",
+            "11.252",
+            "33.637",
+            "8.095",
+            "7.808"
+          ],
+          "min": -0.313,
+          "max": 42.317
+        },
+        "humidity_percentage": {
+          "inferred_type": "float",
+          "type_counts": {
+            "float": 100000
+          },
+          "nulls": 0,
+          "null_pct": 0.0,
+          "distinct": ">1000",
+          "samples": [
+            "54.479",
+            "49.89",
+            "27.454",
+            "43.409",
+            "56.172"
+          ],
+          "min": 11.015,
+          "max": 90.0
+        },
+        "inlet_temperature_c": {
+          "inferred_type": "float",
+          "type_counts": {
+            "float": 100000
+          },
+          "nulls": 0,
+          "null_pct": 0.0,
+          "distinct": ">1000",
+          "samples": [
+            "20.872",
+            "19.725",
+            "22.264",
+            "20.91",
+            "19.381"
+          ],
+          "min": 18.269,
+          "max": 24.895
+        },
+        "exhaust_temperature_c": {
+          "inferred_type": "float",
+          "type_counts": {
+            "float": 100000
+          },
+          "nulls": 0,
+          "null_pct": 0.0,
+          "distinct": ">1000",
+          "samples": [
+            "27.122",
+            "25.833",
+            "28.084",
+            "25.55",
+            "26.87"
+          ],
+          "min": 20.106,
+          "max": 59.998
+        },
+        "fan_speed_rpm": {
+          "inferred_type": "float",
+          "type_counts": {
+            "float": 100000
+          },
+          "nulls": 0,
+          "null_pct": 0.0,
+          "distinct": ">1000",
+          "samples": [
+            "2854.623",
+            "1500.0",
+            "2970.058",
+            "2666.013",
+            "2926.634"
+          ],
+          "min": 1500.0,
+          "max": 5461.989
+        },
+        "airflow_cfm": {
+          "inferred_type": "float",
+          "type_counts": {
+            "float": 100000
+          },
+          "nulls": 0,
+          "null_pct": 0.0,
+          "distinct": ">1000",
+          "samples": [
+            "172.449",
+            "90.321",
+            "167.147",
+            "161.81",
+            "86.483"
+          ],
+          "min": 68.389,
+          "max": 329.759
+        },
+        "cooling_efficiency": {
+          "inferred_type": "float",
+          "type_counts": {
+            "float": 100000
+          },
+          "nulls": 0,
+          "null_pct": 0.0,
+          "distinct": 18,
+          "samples": [
+            "0.88",
+            "1.0",
+            "0.895",
+            "0.925",
+            "0.975"
+          ],
+          "min": 0.835,
+          "max": 1.0
+        },
+        "power_supply_efficiency": {
+          "inferred_type": "float",
+          "type_counts": {
+            "float": 100000
+          },
+          "nulls": 0,
+          "null_pct": 0.0,
+          "distinct": 11,
+          "samples": [
+            "0.9",
+            "0.96",
+            "0.95",
+            "0.91",
+            "0.93"
+          ],
+          "min": 0.87,
+          "max": 0.97
+        },
+        "ups_battery_health": {
+          "inferred_type": "float",
+          "type_counts": {
+            "float": 100000
+          },
+          "nulls": 0,
+          "null_pct": 0.0,
+          "distinct": ">1000",
+          "samples": [
+            "63.263",
+            "88.992",
+            "78.13",
+            "66.36",
+            "94.749"
+          ],
+          "min": 40.0,
+          "max": 100.0
+        },
+        "power_consumption_kw": {
+          "inferred_type": "float",
+          "type_counts": {
+            "float": 100000
+          },
+          "nulls": 0,
+          "null_pct": 0.0,
+          "distinct": ">1000",
+          "samples": [
+            "61.939",
+            "206.84",
+            "96.127",
+            "100.631",
+            "218.814"
+          ],
+          "min": 20.135,
+          "max": 935.354
+        },
+        "pue": {
+          "inferred_type": "float",
+          "type_counts": {
+            "float": 100000
+          },
+          "nulls": 0,
+          "null_pct": 0.0,
+          "distinct": 214,
+          "samples": [
+            "1.137",
+            "1.05",
+            "1.123",
+            "1.132",
+            "1.076"
+          ],
+          "min": 1.05,
+          "max": 1.263
+        },
+        "wue": {
+          "inferred_type": "float",
+          "type_counts": {
+            "float": 100000
+          },
+          "nulls": 0,
+          "null_pct": 0.0,
+          "distinct": ">1000",
+          "samples": [
+            "0.268",
+            "2.353",
+            "0.22",
+            "0.391",
+            "1.779"
+          ],
+          "min": 0.1,
+          "max": 2.5
+        },
+        "carbon_intensity_gco2_kwh": {
+          "inferred_type": "float",
+          "type_counts": {
+            "float": 100000
+          },
+          "nulls": 0,
+          "null_pct": 0.0,
+          "distinct": ">1000",
+          "samples": [
+            "177.167",
+            "198.353",
+            "444.571",
+            "328.678",
+            "190.772"
+          ],
+          "min": 118.381,
+          "max": 641.587
+        },
+        "renewable_energy_ratio": {
+          "inferred_type": "float",
+          "type_counts": {
+            "float": 100000
+          },
+          "nulls": 0,
+          "null_pct": 0.0,
+          "distinct": ">1000",
+          "samples": [
+            "0.893",
+            "0.723",
+            "0.015",
+            "0.329",
+            "0.767"
+          ],
+          "min": 0.0,
+          "max": 1.0
+        },
+        "carbon_emission_kg": {
+          "inferred_type": "float",
+          "type_counts": {
+            "float": 100000
+          },
+          "nulls": 0,
+          "null_pct": 0.0,
+          "distinct": ">1000",
+          "samples": [
+            "1.34",
+            "11.935",
+            "44.217",
+            "24.919",
+            "10.219"
+          ],
+          "min": 0.0,
+          "max": 253.585
+        },
+        "compute_cost_usd": {
+          "inferred_type": "float",
+          "type_counts": {
+            "float": 100000
+          },
+          "nulls": 0,
+          "null_pct": 0.0,
+          "distinct": ">1000",
+          "samples": [
+            "14.09",
+            "43.436",
+            "10.093",
+            "16.954",
+            "45.951"
+          ],
+          "min": 2.307,
+          "max": 94.717
+        },
+        "energy_efficiency_class": {
+          "inferred_type": "string",
+          "type_counts": {
+            "string": 100000
+          },
+          "nulls": 0,
+          "null_pct": 0.0,
+          "distinct": 3,
+          "samples": [
+            "High",
+            "Low",
+            "Medium"
+          ]
+        },
+        "failure_risk_level": {
+          "inferred_type": "string",
+          "type_counts": {
+            "string": 100000
+          },
+          "nulls": 0,
+          "null_pct": 0.0,
+          "distinct": 3,
+          "samples": [
+            "Medium",
+            "Low",
+            "High"
+          ]
+        }
+      },
+      "timestamp_candidates": [],
+      "repeating_identifier_candidates": [
+        "server_type",
+        "cooling_type",
+        "datacenter_region",
+        "time_of_day",
+        "maintenance_status",
+        "energy_source_primary",
+        "server_age_years",
+        "rack_u_position",
+        "virtual_machines_count",
+        "energy_efficiency_class",
+        "failure_risk_level"
+      ],
+      "unique_per_row_columns": []
+    }
+  },
+  "other_files": [
+    "dataset_metadata.json"
+  ]
+}

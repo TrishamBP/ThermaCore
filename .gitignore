@@ -1,0 +1,56 @@
+# Commit only source, configuration, tests and documentation.
+# Everything below is downloaded, generated, local or secret, and is recreated by the documented commands.
+
+# ---- Data (Kaggle download, SQLite databases, Parquet history, simulation exports, reports) ----
+data/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+*.parquet
+*.parquet.tmp
+
+# ---- Logs ----
+logs/
+*.log
+*.jsonl
+
+# ---- Secrets and local environment ----
+.env
+.env.*
+!.env.example
+kaggle.json
+access_token
+*.pem
+*.key
+
+# ---- Python / uv ----
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# ---- Generated tooling output ----
+graphify-out/
+
+# ---- Claude Code: keep project skills, ignore personal settings ----
+.claude/settings.local.json
+
+# ---- Editors / OS ----
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini

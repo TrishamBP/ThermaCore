@@ -1,0 +1,49 @@
+[project]
+name = "data-center-ops"
+version = "0.1.0"
+description = "Data Center Operations Intelligence platform - data engineering (Phase 1 + Kafka producer)"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "confluent-kafka>=2.6,<3",
+    "duckdb>=1.1,<2",
+    "fastapi>=0.115,<1",
+    "jsonschema>=4.23,<5",
+    "kaggle>=2.2.4",
+    "pyarrow>=17,<25",
+    "pydantic-settings>=2.6,<3",
+    "python-dotenv>=1.0,<2",
+    "pyyaml>=6.0.3",
+    "uvicorn>=0.30,<1",
+]
+
+[project.optional-dependencies]
+postgres = [
+    "psycopg[binary]>=3.2,<4",
+]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.27,<1",
+    "numpy>=2.5.4",
+    "psycopg[binary]>=3.2,<4",
+    "pytest>=9.1.1",
+]
+
+[build-system]
+requires = ["uv_build>=0.9.28,<0.10.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = ["data_engineering", "app"]   # pipeline package + API package (src/app)
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "real_data: needs the downloaded dataset and populated SQLite database",
+    "integration: needs a running Kafka broker (docker compose up -d kafka); run with -m integration",
+    "postgres: needs PostgreSQL via TELEMETRY_TEST_POSTGRES_URL (skipped when unset)",
+]
+addopts = "-m 'not integration'"
+# Starlette's TestClient warns that it will move from httpx to httpx2; harmless for these tests.
+filterwarnings = ["ignore:Using `httpx` with `starlette.testclient` is deprecated"]
