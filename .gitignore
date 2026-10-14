@@ -47,6 +47,10 @@ htmlcov/
 
 # ---- Generated tooling output ----
 graphify-out/
+# Launch video: keep only the final video and its poster (shown at the top of README.md).
+brag-output/*
+!brag-output/brag.mp4
+!brag-output/brag.jpg
 
 # ---- Claude Code: keep project skills, ignore personal settings ----
 .claude/settings.local.json

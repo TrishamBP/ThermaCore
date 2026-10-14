@@ -1,5 +1,13 @@
 # ThermaCore: AI for Intelligent Data Center Operations
 
+<p align="center">
+  <a href="brag-output/brag.mp4">
+    <img src="brag-output/brag.jpg" alt="ThermaCore launch video (22 s): click to play" width="900" />
+  </a>
+  <br />
+  <sub>▶ <a href="brag-output/brag.mp4">Watch the 22-second launch video</a> · simulated telemetry · demonstration layout</sub>
+</p>
+
 AMD ACT III Hackathon project. ThermaCore ingests data center telemetry through Apache Kafka, stores it
 idempotently, assesses the thermal and cooling state of every server with deterministic rules, forecasts
 inlet temperature with XGBoost, and lets operators investigate through a LangGraph multi-agent
